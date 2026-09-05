@@ -6,7 +6,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 import venv
 import zipfile
@@ -29,7 +28,7 @@ def main():
             file.write('\nreplace github.com/sambhav/gobridge => ' + json.dumps(ROOT.as_posix()) + '\n')
         target = subprocess.check_output(["go", "env", "GOOS"], text=True).strip() + "-" + subprocess.check_output(["go", "env", "GOARCH"], text=True).strip()
         # Inspection does not generate adapters or dist even in a fresh scaffold.
-        plan = json.loads(run(cli, "build", "--check", "--targets", target).stderr)
+        plan = json.loads(run(cli, "build", "--check", "--targets", target).stdout)
         assert plan["project"]["name"] == "acme.tools.greeter"
         assert not (project / "bridge/zz_gobridge.gen.go").exists()
         assert not (project / "dist").exists()

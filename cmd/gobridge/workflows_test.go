@@ -177,3 +177,11 @@ func TestCustomizationGuards(t *testing.T) {
 		t.Fatal("accepted metadata injection")
 	}
 }
+
+func TestNullProjectManifest(t *testing.T) {
+	inDirectory(t, t.TempDir())
+	writeTestFile(t, "gobridge.json", "null")
+	if _, err := loadProject(); err == nil {
+		t.Fatal("accepted null project manifest")
+	}
+}

@@ -96,7 +96,7 @@ func runInit(args []string, log io.Writer) error {
 		}
 	}
 	if *dry {
-		return json.NewEncoder(log).Encode(files)
+		return json.NewEncoder(os.Stdout).Encode(files)
 	}
 	for path, data := range files {
 		dest := filepath.Join(*dir, path)

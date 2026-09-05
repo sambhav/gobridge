@@ -66,7 +66,7 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		return err
 	}
 	if *check || *dryRun {
-		return json.NewEncoder(log).Encode(plan)
+		return json.NewEncoder(os.Stdout).Encode(plan)
 	}
 	if p.Source != "" {
 		if err := sourcegen.Generate(p.Source, "zz_gobridge.gen.go"); err != nil {

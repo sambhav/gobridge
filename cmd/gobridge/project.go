@@ -38,8 +38,12 @@ func loadProject() (project, error) {
 	defer file.Close()
 	dec := json.NewDecoder(file)
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&p); err != nil {
+	decoded := &p
+	if err := dec.Decode(&decoded); err != nil {
 		return p, fmt.Errorf("gobridge.json: %w", err)
+	}
+	if decoded == nil {
+		return p, fmt.Errorf("gobridge.json: expected a JSON object, got null")
 	}
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {

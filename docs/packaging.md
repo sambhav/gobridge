@@ -296,8 +296,9 @@ gobridge build --python --typescript --targets linux-amd64
 gobridge build --python --typescript --targets linux-amd64 --replace
 ```
 
-`--check` (also `--dry-run`) prints a JSON plan, including resolved names,
-languages, targets, destination, and tool versions. It validates configuration
+`--check` (also `--dry-run`) prints a JSON plan to stdout, including resolved names,
+languages, targets, artifact filenames, destination, and tool versions.
+Use `gobridge build --check > build-plan.json` to save it. It validates configuration
 before generating adapters or creating build output. Python-only builds do not
 require Node. Inspection checks the main package and toolchain; it does not
 promise that application code will compile.

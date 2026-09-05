@@ -1,7 +1,6 @@
 import importlib.util
 import os
 from pathlib import Path
-import subprocess
 import sys
 
 from gobridge.runtime import decode, _json_default

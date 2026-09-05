@@ -25,9 +25,6 @@ def copy_package(project, language, destination):
         relative = path.relative_to(source)
         if path.is_symlink() or any(part.startswith(".") or part in reserved or part.startswith("_gobridge_") for part in relative.parts):
             raise ValueError(f"reserved or unsafe package addition: {relative}")
-        if path.is_file() and language == "typescript" and path.suffix not in {".ts", ".json"}:
-            # Arbitrary data assets are copied too; the compiler only sees .ts.
-            pass
     for path in paths:
         relative = path.relative_to(source)
         if "__pycache__" in relative.parts or path.suffix == ".pyc":
