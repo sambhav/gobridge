@@ -37,7 +37,8 @@ in the same package. A tiny main calls `NewGobridge`, checks its error, and runs
 command package, keeping business logic independent of the CLI entrypoint.
 
 The generator reads Go declarations with the standard Go parser. Parameter names
-come from source, and methods use method expressions; constructors are not
+come from source and become snake_case (`userID` becomes `user_id`), and methods
+use method expressions; constructors are not
 executed during discovery or binding generation. No unsafe runtime parameter-name
 guessing, Python C extensions, or cgo glue is required.
 
@@ -62,6 +63,40 @@ package's intended build configuration. Cross-compilation remains a build step
 after generation; schemas should be stable across targets where the same API is
 supported. Generated adapters and Python bindings are committed and checked for
 drift in CI.
+
+`gobridge generate --dir . --check` compares the adapter with its expected source
+without writing anything; it exits with an actionable error when output is missing
+or stale. Go doc comments become operation descriptions in the generated schema
+and CLI help. `//gobridge:` annotations themselves are omitted from descriptions.
+
+## Run the annotated example
+
+From the repository root:
+
+```sh
+go generate ./examples/annotated
+go run ./examples/annotated --config '{"prefix":"Hey, "}' welcome --name World
+go run ./cmd/gobridge generate --dir examples/annotated --check
+```
+
+The first command generates `examples/annotated/zz_gobridge.gen.go` using the
+repository's CLI. The second prints `"Hey, World"`; the third checks that the Go
+adapter is up to date. The example includes a plain `greet` function, configured
+`welcome` method, typed `stats` result, and a `reset` method returning no value.
+Its atomic counter demonstrates that concurrent calls share the owning Go
+instance safely.
+
+Install the generator from this checkout, then add the directive from the
+opening example to your own project:
+
+```sh
+go install ./cmd/gobridge
+```
+
+Run `go generate ./...` inside your project with the installed `gobridge` on
+`PATH`. Pin the module version when adopting the library. The generator and runtime
+should come from the same version. The generated adapter is ordinary Go source;
+your existing build produces the daemon and its `generate-python` command.
 
 ## Python should see the library, not the adapter
 
