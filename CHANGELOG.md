@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/sambhav/gobridge/compare/v1.0.0...v1.1.0) (2026-09-05)
+
+
+### Features
+
+* support dotted Python namespace packages in builds and dev mode ([#5](https://github.com/sambhav/gobridge/issues/5)) ([50d0dea](https://github.com/sambhav/gobridge/commit/50d0deae4896ecea57a918b27313dd2042bd9300))
+
 ## 1.0.0 (2026-09-05)
 
 
