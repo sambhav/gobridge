@@ -202,7 +202,7 @@ class _Transport:
                 _transports.add(self)
                 self.reader.start()
                 self.writer.start()
-            hello = self._startup_call("$hello", {}, deadline)
+            hello = self._startup_call("$hello", {"compact": True}, deadline)
             if not isinstance(hello, dict) or hello.get("protocol") != 1:
                 raise DaemonError("protocol", "unsupported daemon protocol version")
             if expected_schema is not None and hello.get("schema_hash") != expected_schema:

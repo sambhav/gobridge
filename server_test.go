@@ -2,12 +2,68 @@ package gobridge
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"testing"
 	"time"
 )
+
+func TestCompactHelloPreservesIdentityWithoutConstructing(t *testing.T) {
+	object, calls := newTestObject(t)
+	for _, registry := range []*Registry{New(), object} {
+		full, err := registry.hello(json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		compact, err := registry.hello(json.RawMessage(`{"compact":true}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := json.Marshal(compact)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil {
+			t.Fatal(err)
+		}
+		var hash string
+		if err := json.Unmarshal(fields["schema_hash"], &hash); err != nil {
+			t.Fatal(err)
+		}
+		schema := full.(Schema)
+		if hash != schema.Hash || string(fields["protocol"]) != "1" || fields["operations"] != nil {
+			t.Fatalf("bad compact hello: %s", data)
+		}
+		if (fields["constructor"] != nil) != (schema.Constructor != nil) {
+			t.Fatalf("lost constructor presence: %s", data)
+		}
+	}
+	if calls.Load() != 0 || !object.NeedsInit() {
+		t.Fatal("hello ran constructor")
+	}
+}
+
+func TestDirectResponseEncodingMatchesJSONEnvelope(t *testing.T) {
+	for _, response := range []Response{
+		{ID: "1", Result: nil}, {ID: "<&\"", Result: map[string]any{"text": "<&\u2028", "nil": nil}},
+		{ID: "2", Error: &Error{"invalid_argument", "bad input"}},
+	} {
+		want, err := json.Marshal(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := response.MarshalJSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("%s != %s", got, want)
+		}
+	}
+}
 
 func TestServerCancellationBusyAndEOF(t *testing.T) {
 	r := New()

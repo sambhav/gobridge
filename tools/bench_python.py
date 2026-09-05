@@ -21,10 +21,14 @@ def main():
     parser.add_argument("--size", type=int, default=0)
     parser.add_argument("--rounds", type=int, default=0)
     parser.add_argument("--nested", action="store_true")
+    parser.add_argument("--nodes", type=int, help="explicit item count for batching experiments")
     args = parser.parse_args()
+    nodes = args.nodes if args.nodes is not None else (16 if args.nested else 0)
+    if not 0 <= nodes <= 10000:
+        parser.error("--nodes must be between 0 and 10000")
     binary = str(ROOT / "bin" / ("perf.exe" if os.name == "nt" else "perf"))
     params = dict(data=bytes(args.size), rounds=args.rounds,
-                  nodes=[Node(name="entry", values=[1, 2, 3, 4]) for _ in range(16)] if args.nested else [])
+                  nodes=[Node(name="entry", values=[1, 2, 3, 4]) for _ in range(nodes)])
     samples = [0.] * args.calls
     cold = []
 

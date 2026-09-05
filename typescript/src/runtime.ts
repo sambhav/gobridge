@@ -134,7 +134,7 @@ class Transport {
       return this.submit(method, params, remaining);
     };
     try {
-      const hello = await request("$hello", {});
+      const hello = await request("$hello", { compact: true });
       if (!object(hello) || hello.protocol !== 1) {
         throw new DaemonError("protocol", "unsupported or invalid daemon protocol version");
       }
