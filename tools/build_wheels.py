@@ -13,6 +13,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+PROJECT = ROOT
 TARGETS = {
     "linux-amd64": ("linux", "amd64", "linux_x86_64"),
     "linux-arm64": ("linux", "arm64", "linux_aarch64"),
@@ -24,10 +25,11 @@ TARGETS = {
 
 
 def run(*args, **kwargs):
-    subprocess.run(args, check=True, cwd=ROOT, **kwargs)
+    subprocess.run(args, check=True, cwd=PROJECT, **kwargs)
 
 
 def main():
+    global PROJECT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--targets", nargs="+", choices=TARGETS, default=list(TARGETS))
     parser.add_argument("--go-package", default="./examples/textkit", help="Go command package to build")
@@ -35,7 +37,11 @@ def main():
     parser.add_argument("--class", dest="client_class", default="TextKit", help="Generated Python client class")
     parser.add_argument("--binary", default="textkit", help="Executable filename without .exe")
     parser.add_argument("--distribution", default="gobridge-textkit-example", help="Python wheel distribution name")
+    parser.add_argument("--project", type=Path, default=ROOT, help="Go project directory")
+    parser.add_argument("--output", type=Path, default=ROOT / "dist", help="Wheel output directory")
+    parser.add_argument("--version", default="0.1.0", help="Application package version")
     args = parser.parse_args()
+    PROJECT = args.project.resolve()
     if not args.package.isidentifier() or keyword.iskeyword(args.package):
         parser.error("--package must be one Python package identifier")
     if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", args.client_class):
@@ -44,8 +50,8 @@ def main():
         parser.error("--binary must be a filename stem using letters, digits, _ or -")
     if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?", args.distribution):
         parser.error("--distribution must be a Python distribution name")
-    output = ROOT / "dist"
-    output.mkdir(exist_ok=True)
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
     run(sys.executable, "-m", "pip", "wheel", "--disable-pip-version-check", "--no-index", "--no-deps", "--no-build-isolation", "-w", str(output), str(ROOT / "python"))
     with tempfile.TemporaryDirectory(prefix="gobridge-wheels-") as tmp:
         temp = Path(tmp)
@@ -78,7 +84,7 @@ class PlatformWheel(bdist_wheel):
         self.root_is_pure = False
     def get_tag(self):
         return "py3", "none", {tag!r}
-setup(name={args.distribution!r}, version="0.1.0", packages=[{args.package!r}],
+setup(name={args.distribution!r}, version={args.version!r}, packages=[{args.package!r}],
       package_data={{{args.package!r}: ["py.typed", "_bin/*"]}},
       license="Apache-2.0", license_files=["LICENSE"], python_requires=">=3.10", install_requires=["gobridge-runtime==0.1.0"],
       cmdclass={{"bdist_wheel": PlatformWheel}})

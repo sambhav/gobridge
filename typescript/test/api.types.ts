@@ -1,5 +1,5 @@
 // Compiled, never executed: the generated public API is the type contract.
-import { Greeter, greet, type Stats } from "./annotated.js";
+import { Greeter, greet, type Stats } from "./greeter.js";
 import { WireTypes } from "./wiretypes.js";
 import { Store } from "./metadata.js";
 

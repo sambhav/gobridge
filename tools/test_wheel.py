@@ -9,7 +9,7 @@ import venv
 ROOT = Path(__file__).resolve().parents[1]
 
 EXAMPLES = {
-    "annotated": ("Greeter", "stats", {}, "calls", 0),
+    "greeter": ("Greeter", "stats", {}, "calls", 0),
     "textkit": ("TextKit", "analyze", {"text": "bundled binary works"}, "words", 3),
     "hello": ("Hello", "greet", {"name": "packaged"}, "message", "Hello, packaged!"),
 }
@@ -28,8 +28,8 @@ def main():
         subprocess.run([str(python), "-c", f'''
 import asyncio, dataclasses, importlib, pathlib
 package = importlib.import_module({args.example!r})
-SyncClient = getattr(package, {client_class!r})
-AsyncClient = getattr(package, {("Async" + client_class)!r})
+SyncClient = getattr(package, "Sync" + {client_class!r})
+AsyncClient = getattr(package, {client_class!r})
 with SyncClient() as client:
     assert pathlib.Path(client.command[0]).resolve().is_relative_to(pathlib.Path(package.__file__).resolve().parent)
     result = getattr(client, {operation!r})(**{parameters!r})
@@ -39,13 +39,13 @@ async def main():
         result = await getattr(client, {operation!r})(**{parameters!r})
         assert getattr(result, {field!r}) == {expected!r} and dataclasses.is_dataclass(result)
 asyncio.run(main())
-result = getattr(package, {operation!r})(**{parameters!r})
+result = getattr(package, {operation!r} + "_sync")(**{parameters!r})
 assert getattr(result, {field!r}) == {expected!r}
 async def module_call():
-    result = await getattr(package.aio, {operation!r})(**{parameters!r})
+    result = await getattr(package, {operation!r})(**{parameters!r})
     assert getattr(result, {field!r}) == {expected!r}
 asyncio.run(module_call())
-package.control.close()
+package.shutdown_sync()
 print("Clean {args.example} wheel install: bundled binary, sync and async all passed")
 '''], cwd=temp, check=True, env={k:v for k,v in os.environ.items() if k!="PYTHONPATH"})
 

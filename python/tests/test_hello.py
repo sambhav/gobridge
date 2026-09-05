@@ -12,19 +12,19 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "examples/hello"))
-from hello import AsyncHello, Greeting, Hello, aio, cached_greet, control, greet
+from hello import (Hello as AsyncHello, SyncHello as Hello, Greeting, cached_greet as cached_greet_async, cached_greet_sync as cached_greet, greet_sync as greet, configure, session, session_sync, shutdown_sync)
 
 BINARY = ROOT / "bin" / ("hello.exe" if os.name == "nt" else "hello")
 
 
 @pytest.fixture
 def module_default():
-    control.close()
-    control.configure(command=str(BINARY))
+    shutdown_sync()
+    configure(command=str(BINARY))
     try:
         yield
     finally:
-        control.close()
+        shutdown_sync()
 
 
 @pytest.mark.parametrize("arguments", [
@@ -64,18 +64,18 @@ def test_threads_share_the_module_default_on_concurrent_first_use(module_default
 
 def test_module_sync_and_async_share_state_across_event_loops(module_default):
     original = cached_greet(name="shared default")
-    assert asyncio.run(aio.cached_greet(name="shared default")) == original
-    assert asyncio.run(aio.cached_greet(name="shared default")) == original
+    assert asyncio.run(cached_greet_async(name="shared default")) == original
+    assert asyncio.run(cached_greet_async(name="shared default")) == original
 
 
 def test_nested_scopes_restore_the_previous_client_even_after_error(module_default):
     original = cached_greet(name="scope")
-    with control.scope(command=str(BINARY)) as outer:
+    with session_sync(command=str(BINARY)) as outer:
         scoped = cached_greet(name="scope")
         assert scoped == outer.cached_greet(name="scope")
         assert scoped.process_id != original.process_id
         with pytest.raises(RuntimeError, match="application error"):
-            with control.scope(command=str(BINARY)) as inner:
+            with session_sync(command=str(BINARY)) as inner:
                 nested = cached_greet(name="scope")
                 assert nested == inner.cached_greet(name="scope")
                 assert nested.process_id not in {original.process_id, scoped.process_id}
@@ -86,29 +86,29 @@ def test_nested_scopes_restore_the_previous_client_even_after_error(module_defau
 
 @pytest.mark.asyncio
 async def test_async_scopes_are_isolated_between_tasks_and_restore_default(module_default):
-    original = await aio.cached_greet(name="async scope")
+    original = await cached_greet_async(name="async scope")
     both_entered = asyncio.Event()
     arrivals = 0
 
     async def worker():
         nonlocal arrivals
-        async with control.scope(command=str(BINARY)) as scoped:
-            first = await aio.cached_greet(name="async scope")
+        async with session(command=str(BINARY)) as scoped:
+            first = await cached_greet_async(name="async scope")
             arrivals += 1
             if arrivals == 2:
                 both_entered.set()
             await asyncio.wait_for(both_entered.wait(), timeout=5)
-            again = await aio.cached_greet(name="async scope")
+            again = await cached_greet_async(name="async scope")
             assert first == again
             assert dataclasses.asdict(first) == await scoped.acall(
                 "cached_greet", {"name": "async scope"}
             )
-        assert await aio.cached_greet(name="async scope") == original
+        assert await cached_greet_async(name="async scope") == original
         return first
 
     left, right = await asyncio.gather(worker(), worker())
     assert len({original.process_id, left.process_id, right.process_id}) == 3
-    assert await aio.cached_greet(name="async scope") == original
+    assert await cached_greet_async(name="async scope") == original
 
 
 @pytest.mark.asyncio

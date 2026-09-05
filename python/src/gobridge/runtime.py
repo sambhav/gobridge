@@ -498,6 +498,15 @@ class Client:
         await self.aclose()
 
 
+def require_sync() -> None:
+    """Reject blocking facade calls before creating or touching a transport."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    raise RuntimeError("synchronous bridge calls cannot run inside an event loop; use the async API with await")
+
+
 class AsyncClient(Client):
     """Base for generated async clients; supports async context management."""
 

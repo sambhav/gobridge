@@ -76,7 +76,7 @@ func TestTypeScriptGeneratedPublicAPIAndExactSchema(t *testing.T) {
 		"async nothing(options?: _bridgeCallOptions): Promise<void>",
 		"async stats(options?: _bridgeCallOptions): Promise<tsRecord>",
 		"export function countValue(params: CountValueParams, options?: _bridgeCallOptions): Promise<bigint>",
-		"return control.client().countValue(params, options);",
+		"return _bridgeDefaults.client().countValue(params, options);",
 		`super.call("count_value",`,
 		"init: _bridgeEncode(schema.constructor!, _bridgeConfig)",
 		"expectedSchema: schema.schema_hash",

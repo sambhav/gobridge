@@ -132,7 +132,7 @@ jobs:
           path: dist
       - run: python tools/test_wheel.py
       - run: python tools/test_wheel.py --example hello
-      - run: python tools/test_wheel.py --example annotated
+      - run: python tools/test_wheel.py --example greeter
   minimum-go:
     runs-on: ubuntu-latest
     steps:
@@ -159,7 +159,7 @@ jobs:
       - run: python -m pip install setuptools wheel
       - run: python tools/build_wheels.py
       - run: python tools/build_wheels.py --go-package ./examples/hello --package hello --class Hello --binary hello --distribution gobridge-hello-example
-      - run: python tools/build_wheels.py --go-package ./examples/annotated/cmd/annotated --package annotated --class Greeter --binary annotated --distribution gobridge-annotated-example
+      - run: python tools/build_wheels.py --go-package ./examples/greeter/cmd/greeter --package greeter --class Greeter --binary greeter --distribution gobridge-greeter-example
       - uses: actions/upload-artifact@v4
         with:
           name: wheels

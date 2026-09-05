@@ -45,7 +45,7 @@ def test_metadata_uses_standard_dataclasses_and_exact_integers(metadata_api):
     assert request(api).age is None
     assert inspect.signature(api.Store).parameters["capacity"].default is inspect.Parameter.empty
     assert dataclasses.fields(api.Config)[0].metadata["description"] == "Maximum stored items."
-    with api.Store(binary, capacity=2) as store:
+    with api.SyncStore(binary, capacity=2) as store:
         original = request(api)
         assert store.echo(request=original) == original
         assert store.flattened(**dataclasses.asdict(original)) == original
@@ -67,7 +67,7 @@ def test_all_calls_apply_the_same_go_constraints(metadata_api, changes, path):
     api, binary = metadata_api
     # Dataclass construction remains lightweight. The daemon owns enforcement.
     value = request(api, **changes)
-    with api.Store(binary, capacity=2) as store:
+    with api.SyncStore(binary, capacity=2) as store:
         with pytest.raises(InvalidArgumentError, match=path):
             store.echo(request=value)
         with pytest.raises(InvalidArgumentError, match=path):
@@ -77,7 +77,7 @@ def test_all_calls_apply_the_same_go_constraints(metadata_api, changes, path):
 def test_constructor_constraints_and_help_are_shared(metadata_api):
     api, binary = metadata_api
     with pytest.raises(InvalidArgumentError, match="capacity"):
-        with api.Store(binary, capacity=0):
+        with api.SyncStore(binary, capacity=0):
             pass
     help_text = subprocess.check_output([str(binary), "echo", "--help"], text=True, encoding="utf-8")
     assert "Maximum stored items." in help_text
@@ -91,7 +91,7 @@ def test_constructor_constraints_and_help_are_shared(metadata_api):
 def test_lowercase_go_model_is_not_shadowed_by_field_or_parameter(metadata_api):
     api, binary = metadata_api
     value = api.Holder(record=api.record(name="nested"))
-    with api.Store(binary, capacity=2) as store:
+    with api.SyncStore(binary, capacity=2) as store:
         result = store.lowercase(record=value)
         assert isinstance(result.record, api.record)
         assert result == value

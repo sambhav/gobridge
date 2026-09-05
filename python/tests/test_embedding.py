@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from annotated import Greeter
+from greeter import SyncGreeter as Greeter
 from gobridge import RuntimeOptions
 
 ROOT = Path(__file__).resolve().parents[2]

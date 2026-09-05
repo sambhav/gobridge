@@ -11,6 +11,7 @@ import weakref
 from .runtime import Client
 
 T = TypeVar("T", bound=Client)
+U = TypeVar("U", bound=Client)
 _controls: weakref.WeakSet = weakref.WeakSet()
 
 
@@ -61,7 +62,7 @@ class DefaultControl(Generic[T]):
         """
         with self._lock:
             if self._default is not None:
-                raise RuntimeError("default client already exists; call control.close() before configuring it")
+                raise RuntimeError("default client already exists; call shutdown() before configuring it")
             self._kwargs = dict(kwargs)
 
     def start(self) -> T:
@@ -88,10 +89,23 @@ class DefaultControl(Generic[T]):
         """
         return _Scope(self, kwargs)
 
+    def scope_for(self, factory: Callable[..., U], kwargs: dict, *, asynchronous: bool = True) -> _Scope[U]:
+        """Use an async facade while sharing this module's context selection."""
+        return _Scope(self, kwargs, factory, asynchronous)
+
+    async def aclose(self) -> None:
+        with self._lock:
+            client, self._default = self._default, None
+        if client is not None:
+            await client.aclose()
+
 
 class _Scope(Generic[T]):
-    def __init__(self, control: DefaultControl[T], kwargs: dict):
+    def __init__(self, control: DefaultControl, kwargs: dict, factory: Callable[..., T] | None = None,
+                 asynchronous: bool | None = None):
         self._control, self._kwargs = control, kwargs
+        self._factory = factory or control._factory
+        self._asynchronous = asynchronous
         self._client: T | None = None
         self._token: Token | None = None
         self._entered = False
@@ -101,7 +115,7 @@ class _Scope(Generic[T]):
             raise RuntimeError("a scope context cannot be entered while already active")
         self._entered = True
         try:
-            self._client = self._control._factory(**self._kwargs)
+            self._client = self._factory(**self._kwargs)
         except BaseException:
             self._entered = False
             raise
@@ -119,6 +133,8 @@ class _Scope(Generic[T]):
         return client
 
     def __enter__(self) -> T:
+        if self._asynchronous is True:
+            raise TypeError("use async with session(), or with session_sync()")
         client = self._create()
         try:
             client.start()
@@ -132,6 +148,8 @@ class _Scope(Generic[T]):
         self._restore().close()
 
     async def __aenter__(self) -> T:
+        if self._asynchronous is False:
+            raise TypeError("use with session_sync(), or async with session()")
         client = self._create()
         try:
             await asyncio.to_thread(client.start)

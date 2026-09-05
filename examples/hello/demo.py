@@ -7,11 +7,11 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
 
-from hello import AsyncHello, Hello, aio, cached_greet, control, greet
+from hello import (Hello as AsyncHello, SyncHello as Hello, cached_greet as cached_greet_async, cached_greet_sync as cached_greet, greet_sync as greet, configure, session_sync, shutdown_sync)
 
 
 async def module_async_demo(original) -> None:
-    assert await aio.cached_greet(name="default") == original
+    assert await cached_greet_async(name="default") == original
     print("Sync and async functions share one default Go cache.")
 
 
@@ -35,13 +35,13 @@ def main() -> None:
     args = parser.parse_args()
 
     # Installed wheels need no configuration: import greet and call it.
-    control.configure(command=args.binary)
+    configure(command=args.binary)
     try:
         print(greet(name="world").message)
         original = cached_greet(name="default")
         asyncio.run(module_async_demo(original))
 
-        with control.scope(command=args.binary) as isolated:
+        with session_sync(command=args.binary) as isolated:
             scoped = cached_greet(name="default")
             assert scoped.process_id != original.process_id
             assert scoped == isolated.cached_greet(name="default")
@@ -63,7 +63,7 @@ def main() -> None:
 
         asyncio.run(async_demo(args.binary))
     finally:
-        control.close()
+        shutdown_sync()
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ import pytest
 
 from gobridge import Client, ClosedError, DaemonError, RuntimeOptions
 from gobridge.defaults import DefaultControl
-from textkit import TextKit
+from textkit import SyncTextKit as TextKit
 
 ROOT = Path(__file__).resolve().parents[2]
 BINARY = ROOT / "bin" / ("textkit.exe" if os.name == "nt" else "textkit")
@@ -163,8 +163,8 @@ def test_scope_does_not_switch_an_unrelated_thread(control):
 
 
 async def test_async_scopes_are_isolated_and_child_tasks_inherit(control):
-    default = control.start()
-    default_pid = default.health().process_id
+    default = await asyncio.to_thread(control.start)
+    default_pid = (await default.acall("health"))["process_id"]
     ready = [asyncio.Event(), asyncio.Event()]
 
     async def scoped_task(index):

@@ -10,7 +10,7 @@ TYPESCRIPT = ROOT / "typescript"
 EXAMPLES = {
     "textkit": ("./examples/textkit", "TextKit"),
     "hello": ("./examples/hello", "Hello"),
-    "annotated": ("./examples/annotated/cmd/annotated", "Greeter"),
+    "greeter": ("./examples/greeter/cmd/greeter", "Greeter"),
     "wiretypes": ("./internal/fixtures/wiretypes", "WireTypes"),
     "metadata": ("./internal/fixtures/metadata", "Store"),
 }

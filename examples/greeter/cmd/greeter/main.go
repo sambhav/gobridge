@@ -1,11 +1,11 @@
-// Command annotated exposes the greeter library as a CLI and stdio daemon.
+// Command greeter exposes the greeter library as a CLI and stdio daemon.
 package main
 
 import (
 	"fmt"
 	"os"
 
-	greeter "github.com/sambhav/gobridge/examples/annotated"
+	greeter "github.com/sambhav/gobridge/examples/greeter"
 )
 
 func main() {

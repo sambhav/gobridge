@@ -43,7 +43,7 @@ export class Greeter extends _bridgeClient {
   constructor(options: GreeterOptions = {}) {
     const { _runtime, ..._bridgeConfig } = options;
     const _bridgeOptions = _runtime ?? {};
-    super(_bridgeOptions.command ?? _bridgeResolveBinary(import.meta.url, "annotated"), {
+    super(_bridgeOptions.command ?? _bridgeResolveBinary(import.meta.url, "greeter"), {
       ..._bridgeOptions,
       expectedSchema: schema.schema_hash,
       init: _bridgeEncode(schema.constructor!, _bridgeConfig),
@@ -84,33 +84,45 @@ export class Greeter extends _bridgeClient {
 
 }
 
-export const control = new _bridgeDefaultControl<GreeterOptions, Greeter>((options) => new Greeter(options));
+const _bridgeDefaults = new _bridgeDefaultControl<GreeterOptions, Greeter>((options) => new Greeter(options));
+
+export function configure(options: GreeterOptions): void {
+  _bridgeDefaults.configure(options);
+}
+
+export function session<R>(options: GreeterOptions, callback: (client: Greeter) => R | Promise<R>): Promise<R> {
+  return _bridgeDefaults.scope(options, callback);
+}
+
+export function shutdown(): Promise<void> {
+  return _bridgeDefaults.close();
+}
 
 /**
  * Greet returns a friendly greeting using an ordinary Go function.
  */
 export function greet(params: GreetParams, options?: _bridgeCallOptions): Promise<string> {
-  return control.client().greet(params, options);
+  return _bridgeDefaults.client().greet(params, options);
 }
 
 /**
  * Reset clears the instance's call counter and returns None in Python.
  */
 export function reset(options?: _bridgeCallOptions): Promise<void> {
-  return control.client().reset(options);
+  return _bridgeDefaults.client().reset(options);
 }
 
 /**
  * Statistics reports calls owned by this instance.
  */
 export function stats(options?: _bridgeCallOptions): Promise<Stats> {
-  return control.client().stats(options);
+  return _bridgeDefaults.client().stats(options);
 }
 
 /**
  * Welcome greets someone with this client's configured prefix.
  */
 export function welcome(params: WelcomeParams, options?: _bridgeCallOptions): Promise<string> {
-  return control.client().welcome(params, options);
+  return _bridgeDefaults.client().welcome(params, options);
 }
 

@@ -20,7 +20,7 @@ export class DefaultControl<O extends object, C extends Client> {
 
   configure(options: O): void {
     if (this.#default !== undefined) {
-      throw new Error("default client already exists; call control.close() before configuring it");
+      throw new Error("default client already exists; call shutdown() before configuring it");
     }
     this.#options = structuredClone(options);
   }
@@ -35,7 +35,7 @@ export class DefaultControl<O extends object, C extends Client> {
     await client?.close();
   }
 
-  async scope<R>(options: O, callback: (client: C) => Promise<R>): Promise<R> {
+  async scope<R>(options: O, callback: (client: C) => R | Promise<R>): Promise<R> {
     const client = this.#factory(structuredClone(options));
     try {
       await client.start();

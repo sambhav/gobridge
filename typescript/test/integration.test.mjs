@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { spawnSync } from "node:child_process";
-import { Greeter, control, greet, welcome, stats } from "../.generated/dist/annotated.js";
+import { Greeter, configure, session, shutdown, greet, welcome, stats } from "../.generated/dist/greeter.js";
 import { Hello } from "../.generated/dist/hello.js";
 import { TextKit } from "../.generated/dist/textkit.js";
 import { WireTypes } from "../.generated/dist/wiretypes.js";
@@ -16,8 +16,8 @@ const binary = name => join(root, "bin", name + (process.platform === "win32" ? 
 const runtime = name => ({command: binary(name)});
 
 test("generated functions, constructor options, camelCase and void work with Go", async () => {
-  const first = new Greeter({prefix: "Hi, ", _runtime: runtime("annotated")});
-  const second = new Greeter({_runtime: runtime("annotated")});
+  const first = new Greeter({prefix: "Hi, ", _runtime: runtime("greeter")});
+  const second = new Greeter({_runtime: runtime("greeter")});
   try {
     assert.equal(await first.greet({name: "World"}), "Hello, World!");
     assert.equal(await first.welcome({name: "Sam"}), "Hi, Sam");
@@ -40,16 +40,16 @@ test("generated functions, constructor options, camelCase and void work with Go"
 });
 
 test("module defaults share one daemon and concurrent nested scopes stay isolated", async () => {
-  control.configure({prefix: "Default: ", _runtime: runtime("annotated")});
+  configure({prefix: "Default: ", _runtime: runtime("greeter")});
   try {
     assert.equal(await greet({name: "World"}), "Hello, World!");
     assert.equal(await welcome({name: "Sam"}), "Default: Sam");
     const original = await stats();
     const scopedPids = await Promise.all(["A: ", "B: "].map(prefix =>
-      control.scope({prefix, _runtime: runtime("annotated")}, async client => {
+      session({prefix, _runtime: runtime("greeter")}, async client => {
         assert.equal(await welcome({name: "Sam"}), prefix + "Sam");
         const outer = await client.stats();
-        await control.scope({prefix: "Inner: ", _runtime: runtime("annotated")}, async () => {
+        await session({prefix: "Inner: ", _runtime: runtime("greeter")}, async () => {
           assert.equal(await welcome({name: "Sam"}), "Inner: Sam");
           assert.notEqual((await stats()).processId, outer.processId);
         });
@@ -59,11 +59,11 @@ test("module defaults share one daemon and concurrent nested scopes stay isolate
     ));
     assert.equal(new Set([original.processId, ...scopedPids]).size, 3);
     assert.deepEqual(await stats(), original);
-    await assert.rejects(control.scope({_runtime: runtime("annotated")}, async () => {
+    await assert.rejects(session({_runtime: runtime("greeter")}, async () => {
       throw new Error("scope failure");
     }), /scope failure/);
     assert.deepEqual(await stats(), original);
-  } finally { await control.close(); }
+  } finally { await shutdown(); }
 });
 
 test("full int64 range and nested nullable data round trip exactly", async () => {
@@ -131,14 +131,14 @@ test("generated TypeScript can launch only an embedded Cobra daemon", async () =
 });
 
 test("worker threads create separate defaults and Go state", async () => {
-  const client = new Greeter({_runtime: runtime("annotated")});
+  const client = new Greeter({_runtime: runtime("greeter")});
   try {
     await client.welcome({name: "Parent"});
     const parent = await client.stats();
     const result = await new Promise((resolve, reject) => {
       const worker = new Worker(new URL("./worker.mjs", import.meta.url), {workerData: {
-        moduleURL: new URL("../.generated/dist/annotated.js", import.meta.url).href,
-        command: binary("annotated"),
+        moduleURL: new URL("../.generated/dist/greeter.js", import.meta.url).href,
+        command: binary("greeter"),
       }});
       let value;
       worker.once("message", message => { value = message; });
@@ -152,10 +152,10 @@ test("worker threads create separate defaults and Go state", async () => {
 });
 
 test("a short Node script exits normally without explicitly closing its default", () => {
-  const moduleURL = new URL("../.generated/dist/annotated.js", import.meta.url).href;
+  const moduleURL = new URL("../.generated/dist/greeter.js", import.meta.url).href;
   const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
-    import {control, welcome, stats} from ${JSON.stringify(moduleURL)};
-    control.configure({_runtime: {command: ${JSON.stringify(binary("annotated"))}}});
+    import {configure, session, shutdown, welcome, stats} from ${JSON.stringify(moduleURL)};
+    configure({_runtime: {command: ${JSON.stringify(binary("greeter"))}}});
     await welcome({name: "Child"});
     console.log(String((await stats()).calls));
   `], {encoding: "utf8", timeout: 15000});

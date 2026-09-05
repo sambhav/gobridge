@@ -93,12 +93,17 @@ def decode(cls, value):
 def resolve_binary(path, stem): return ["bundled-" + stem]
 for name in ("RuntimeOptions", "Client", "AsyncClient", "DefaultControl", "decode", "resolve_binary"):
     setattr(bridge, name, globals()[name])
+bridge.require_sync = lambda: None
 sys.modules["gobridge"] = bridge
+sys.modules["gobridge.defaults"] = bridge
+sys.modules["gobridge.runtime"] = bridge
 module = types.ModuleType("generated_example")
 module.__file__ = "generated_example.py"
 sys.modules[module.__name__] = module
 exec(compile(sys.stdin.read(), module.__file__, "exec"), module.__dict__)
 
+assert inspect.iscoroutinefunction(module.greet) if hasattr(module, "greet") else inspect.iscoroutinefunction(module.echo)
+assert not hasattr(module, "aio") and not hasattr(module, "control")
 signature = inspect.signature(module.Example)
 assert signature.parameters["initial"].kind is inspect.Parameter.KEYWORD_ONLY
 assert signature.parameters["initial"].default is inspect.Parameter.empty
@@ -109,7 +114,7 @@ assert inspect.signature(module.echo).return_annotation == "int"
 assert inspect.signature(module.do_nothing).return_annotation == "None"
 assert inspect.signature(module.roundtrip).return_annotation == "list[int] | None"
 
-client = module.Example(initial=10, options="custom", resolve_binary="provider", timeout=17)
+client = module.SyncExample(initial=10, options="custom", resolve_binary="provider", timeout=17)
 assert client.command == ["bundled-example"]
 assert client.kwargs["timeout"] == 30
 assert client.kwargs["init"] == {"initial": 10, "options": "custom", "resolve_binary": "provider", "timeout": 17, "label": None}
@@ -118,12 +123,12 @@ assert client.do_nothing() is None
 assert client.roundtrip(values=[1, 2]) == [1, 2]
 assert client.describe_names(decode="safe", control=2, result=False) == "safe:2"
 assert client.record_value(record=module.record(value="go")) == module.record(value="go")
-module.control.instance = client
-assert module.echo(value=0) == 0
-assert module.describe_names(decode="module", control=3, result=False) == "module:3"
-assert asyncio.run(module.aio.describe_names(decode="async", control=4, result=False)) == "async:4"
-assert asyncio.run(module.aio.do_nothing()) is None
-async_client = module.AsyncExample(initial=10, options="custom", resolve_binary="provider", timeout=17)
+module._bridge_defaults.instance = client
+assert module.echo_sync(value=0) == 0
+assert module.describe_names_sync(decode="module", control=3, result=False) == "module:3"
+assert asyncio.run(module.describe_names(decode="async", control=4, result=False)) == "async:4"
+assert asyncio.run(module.do_nothing()) is None
+async_client = module.Example(initial=10, options="custom", resolve_binary="provider", timeout=17)
 assert asyncio.run(async_client.echo(value=2)) == 2
 `
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -186,5 +191,21 @@ func TestPythonClassNameRejectsKeywords(t *testing.T) {
 				t.Fatal("failed generation wrote partial output")
 			}
 		})
+	}
+}
+
+func TestPythonGenerationRejectsSyncHelperCollisions(t *testing.T) {
+	r := New()
+	for _, name := range []string{"greet", "greet_sync"} {
+		if err := Bind(r, name, func() string { return "hello" }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var output bytes.Buffer
+	if err := r.GeneratePython(&output, "Greeter", "greeter"); err == nil || !strings.Contains(err.Error(), "sync helper") {
+		t.Fatalf("collision not rejected: %v", err)
+	}
+	if output.Len() != 0 {
+		t.Fatal("partial output written")
 	}
 }

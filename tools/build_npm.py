@@ -47,12 +47,15 @@ def pack(stage, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--targets", nargs="+", choices=TARGETS, default=list(TARGETS))
-    parser.add_argument("--go-package", default="./examples/annotated/cmd/annotated", help="Go command package to build")
+    parser.add_argument("--go-package", default="./examples/greeter/cmd/greeter", help="Go command package to build")
     parser.add_argument("--class", dest="client_class", default="Greeter", help="Generated TypeScript client class")
-    parser.add_argument("--binary", default="annotated", help="Executable filename without .exe")
+    parser.add_argument("--binary", default="greeter", help="Executable filename without .exe")
     parser.add_argument("--package", default="gobridge-greeter-example", help="Generated npm package name")
     parser.add_argument("--output", type=Path, default=ROOT / "dist" / "npm", help="Tarball output directory")
+    parser.add_argument("--project", type=Path, default=ROOT, help="Go project directory")
+    parser.add_argument("--version", help="Application package version")
     args = parser.parse_args()
+    project = args.project.resolve()
     if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", args.client_class):
         parser.error("--class must be a capitalized class identifier")
     if not re.fullmatch(r"[A-Za-z0-9_-]+", args.binary):
@@ -67,7 +70,8 @@ def main():
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     runtime_manifest = json.loads((RUNTIME / "package.json").read_text())
-    version = runtime_manifest["version"]
+    runtime_version = runtime_manifest["version"]
+    version = args.version or runtime_version
     npm("run", "build", cwd=RUNTIME)
     runtime_tarball = pack(RUNTIME, output)
     with tempfile.TemporaryDirectory(prefix="gobridge-npm-") as temp:
@@ -75,7 +79,7 @@ def main():
         host = temporary / (args.binary + (".exe" if os.name == "nt" else ""))
         host_env = {key: value for key, value in os.environ.items() if key not in {"GOOS", "GOARCH"}}
         host_env["CGO_ENABLED"] = "0"
-        subprocess.run(["go", "build", "-o", str(host), args.go_package], cwd=ROOT, env=host_env, check=True)
+        subprocess.run(["go", "build", "-o", str(host), args.go_package], cwd=project, env=host_env, check=True)
         bindings = subprocess.check_output([
             str(host), "generate-typescript", "--class", args.client_class, "--binary", args.binary,
         ])
@@ -94,7 +98,7 @@ def main():
             "files": ["index.js", "index.d.ts", "_bin", "LICENSE", "README.md"],
             "license": "Apache-2.0",
             "engines": {"node": ">=24"},
-            "dependencies": {"gobridge-runtime": version},
+            "dependencies": {"gobridge-runtime": runtime_version},
         }
         (stage / "package.json").write_text(json.dumps(manifest, indent=2) + "\n")
         shutil.copyfile(ROOT / "LICENSE", stage / "LICENSE")
@@ -127,7 +131,7 @@ def main():
             binary_dir.mkdir(parents=True)
             binary = binary_dir / (args.binary + (".exe" if goos == "windows" else ""))
             env = dict(os.environ, GOOS=goos, GOARCH=goarch, CGO_ENABLED="0")
-            subprocess.run(["go", "build", "-trimpath", "-o", str(binary), args.go_package], cwd=ROOT, env=env, check=True)
+            subprocess.run(["go", "build", "-trimpath", "-o", str(binary), args.go_package], cwd=project, env=env, check=True)
             binary.chmod(0o755)
             print("Built", node_target, flush=True)
         pack(stage, output)

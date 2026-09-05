@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/signal"
 
-	greeter "github.com/sambhav/gobridge/examples/annotated"
+	greeter "github.com/sambhav/gobridge/examples/greeter"
 	"github.com/spf13/cobra"
 )
 

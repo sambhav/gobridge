@@ -12,7 +12,7 @@ import typing
 import pytest
 
 from gobridge import BridgeError, Client, DaemonError, InvalidArgumentError
-from textkit import Analysis, AsyncTextKit, TextKit
+from textkit import Analysis, TextKit as AsyncTextKit, SyncTextKit as TextKit
 
 ROOT = Path(__file__).resolve().parents[2]
 BINARY = ROOT / "bin" / ("textkit.exe" if os.name == "nt" else "textkit")
@@ -66,7 +66,7 @@ def test_schema_mismatch_fails_before_operations():
 def test_nested_models_and_full_width_integers(wiretypes):
     module, binary = wiretypes
     child = module.Child(name="nested")
-    with module.WireTypes(binary) as client:
+    with module.SyncWireTypes(binary) as client:
         result = client.echo(child=child, items=[child], labels={"one": child}, big=2**63-1)
         assert isinstance(result.child, module.Child)
         assert result.items[0] == child
@@ -80,7 +80,7 @@ def test_nested_models_and_full_width_integers(wiretypes):
 
 def test_panic_and_oversized_response_do_not_kill_daemon(wiretypes):
     module, binary = wiretypes
-    with module.WireTypes(binary) as client:
+    with module.SyncWireTypes(binary) as client:
         with pytest.raises(BridgeError, match="operation panicked"):
             client.explode()
         with pytest.raises(BridgeError) as error:

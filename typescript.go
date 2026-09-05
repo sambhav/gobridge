@@ -139,7 +139,7 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string) error {
 	if !regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(binary) {
 		return fmt.Errorf("binary must be a filename stem")
 	}
-	reserved := map[string]bool{"schema": true, "control": true, "Promise": true, "Record": true}
+	reserved := map[string]bool{"schema": true, "configure": true, "session": true, "shutdown": true, "Promise": true, "Record": true}
 	if reserved[class] {
 		return fmt.Errorf("class %s conflicts with generated TypeScript symbols", class)
 	}
@@ -268,7 +268,10 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string) error {
 		fmt.Fprintf(&b, "    return _bridgeDecode<%s>(_bridgeOp%d.output, _bridgeResult);\n  }\n\n", tsType(op.Output), index)
 	}
 	fmt.Fprint(&b, "}\n\n")
-	fmt.Fprintf(&b, "export const control = new _bridgeDefaultControl<%s, %s>((options) => new %s(options));\n\n", optionsName, class, class)
+	fmt.Fprintf(&b, "const _bridgeDefaults = new _bridgeDefaultControl<%s, %s>((options) => new %s(options));\n\n", optionsName, class, class)
+	fmt.Fprintf(&b, "export function configure(options: %s): void {\n  _bridgeDefaults.configure(options);\n}\n\n", optionsName)
+	fmt.Fprintf(&b, "export function session<R>(options: %s, callback: (client: %s) => R | Promise<R>): Promise<R> {\n  return _bridgeDefaults.scope(options, callback);\n}\n\n", optionsName, class)
+	fmt.Fprint(&b, "export function shutdown(): Promise<void> {\n  return _bridgeDefaults.close();\n}\n\n")
 	for _, op := range schema.Operations {
 		tsJSDoc(&b, "", op.Description, nil)
 		params := "options?: _bridgeCallOptions"
@@ -277,7 +280,7 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string) error {
 			params = "params: " + op.Input.Name + ", " + params
 			args = "params, options"
 		}
-		fmt.Fprintf(&b, "export function %s(%s): Promise<%s> {\n  return control.client().%s(%s);\n}\n\n", tsCamel(op.Name), params, tsType(op.Output), tsCamel(op.Name), args)
+		fmt.Fprintf(&b, "export function %s(%s): Promise<%s> {\n  return _bridgeDefaults.client().%s(%s);\n}\n\n", tsCamel(op.Name), params, tsType(op.Output), tsCamel(op.Name), args)
 	}
 	_, err = io.WriteString(w, b.String())
 	return err

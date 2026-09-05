@@ -12,13 +12,13 @@ def main():
     subprocess.run(["go", "test", "-race", "./..."], check=True)
     subprocess.run(["go", "vet", "./..."], check=True)
     subprocess.run(["go", "test", "-race", "./..."], cwd=ROOT / "examples/cobra", check=True)
-    subprocess.run(["go", "run", "./cmd/gobridge", "generate", "--dir", "./examples/annotated", "--check"], check=True)
-    for name, client_class in [("textkit", "TextKit"), ("hello", "Hello"), ("annotated", "Greeter")]:
+    subprocess.run(["go", "run", "./cmd/gobridge", "generate", "--dir", "./examples/greeter", "--check"], check=True)
+    for name, client_class in [("textkit", "TextKit"), ("hello", "Hello"), ("greeter", "Greeter")]:
         binary = ROOT / "bin" / (name + (".exe" if os.name == "nt" else ""))
         binary.parent.mkdir(exist_ok=True)
         go_package = f"./examples/{name}"
-        if name == "annotated":
-            go_package += "/cmd/annotated"
+        if name == "greeter":
+            go_package += "/cmd/greeter"
         subprocess.run(["go", "build", "-o", str(binary), go_package], check=True)
         generated = subprocess.check_output([
             str(binary), "generate-python", "--class", client_class, "--binary", name,

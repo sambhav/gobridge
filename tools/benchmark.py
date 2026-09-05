@@ -11,7 +11,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "python/src"), str(ROOT / "examples/textkit")]
-from textkit import AsyncTextKit, TextKit
+from textkit import TextKit as AsyncTextKit, SyncTextKit as TextKit
 
 
 def latency(values):

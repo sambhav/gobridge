@@ -41,15 +41,15 @@ import { access, readFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Greeter, control, greet, welcome, stats } from "gobridge-greeter-example";
+import { Greeter, configure, session, shutdown, greet, welcome, stats } from "gobridge-greeter-example";
 import { resolveBinary } from "gobridge-runtime";
 
 const moduleURL = import.meta.resolve("gobridge-greeter-example");
 const packageRoot = dirname(fileURLToPath(moduleURL));
-const binaryName = process.platform === "win32" ? "annotated.exe" : "annotated";
+const binaryName = process.platform === "win32" ? "greeter.exe" : "greeter";
 const packagedBinary = join(packageRoot, "_bin", `${process.platform}-${process.arch}`, binaryName);
 await access(packagedBinary, process.platform === "win32" ? constants.F_OK : constants.X_OK);
-assert.equal(resolveBinary(moduleURL, "annotated"), packagedBinary);
+assert.equal(resolveBinary(moduleURL, "greeter"), packagedBinary);
 const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
 assert.equal(manifest.dependencies["gobridge-runtime"], __RUNTIME_VERSION__);
 
@@ -69,13 +69,13 @@ try {
   } finally {
     await greeter.close();
   }
-  await control.scope({prefix: "Scoped: "}, async (client) => {
+  await session({prefix: "Scoped: "}, async (client) => {
     assert.equal(await welcome({name: "Sam"}), "Scoped: Sam");
     assert.equal((await client.stats()).calls, 1n);
   });
   assert.equal((await stats()).calls, 1n);
 } finally {
-  await control.close();
+  await shutdown();
 }
 console.log("Clean npm install: bundled binary, functions, classes, scopes and bigint passed");
 '''.replace("__RUNTIME_VERSION__", json.dumps(version)))

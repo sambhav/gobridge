@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	greeter "github.com/sambhav/gobridge/examples/annotated"
+	greeter "github.com/sambhav/gobridge/examples/greeter"
 )
 
 func TestAnnotatedObject(t *testing.T) {

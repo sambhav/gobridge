@@ -20,7 +20,7 @@ import time
 import pytest
 
 from gobridge import Client, ClosedError, DaemonError, InvalidArgumentError, RequestTimeout, RuntimeOptions
-from textkit import TextKit
+from textkit import SyncTextKit as TextKit
 
 ROOT = Path(__file__).resolve().parents[2]
 BINARY = ROOT / "bin" / ("textkit.exe" if os.name == "nt" else "textkit")

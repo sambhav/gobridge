@@ -15,7 +15,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "examples/textkit"))
-from textkit import Analysis, AsyncTextKit, TextKit
+from textkit import Analysis, TextKit as AsyncTextKit, SyncTextKit as TextKit
 from gobridge import BusyError, Client, ClosedError, DaemonError, InvalidArgumentError, RequestTimeout, RuntimeOptions
 
 BINARY = str(ROOT / "bin" / ("textkit.exe" if os.name == "nt" else "textkit"))

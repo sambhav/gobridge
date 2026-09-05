@@ -47,3 +47,6 @@ __pycache__/
 node_modules/
 /typescript/dist/
 /typescript/.generated/
+
+# Generated development packages and local applications.
+/build/

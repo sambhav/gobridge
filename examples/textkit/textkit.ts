@@ -78,26 +78,38 @@ export class TextKit extends _bridgeClient {
 
 }
 
-export const control = new _bridgeDefaultControl<TextKitOptions, TextKit>((options) => new TextKit(options));
+const _bridgeDefaults = new _bridgeDefaultControl<TextKitOptions, TextKit>((options) => new TextKit(options));
+
+export function configure(options: TextKitOptions): void {
+  _bridgeDefaults.configure(options);
+}
+
+export function session<R>(options: TextKitOptions, callback: (client: TextKit) => R | Promise<R>): Promise<R> {
+  return _bridgeDefaults.scope(options, callback);
+}
+
+export function shutdown(): Promise<void> {
+  return _bridgeDefaults.close();
+}
 
 /**
  * Count words and Unicode code points; cache results in Go.
  */
 export function analyze(params: AnalyzeInput, options?: _bridgeCallOptions): Promise<Analysis> {
-  return control.client().analyze(params, options);
+  return _bridgeDefaults.client().analyze(params, options);
 }
 
 /**
  * Inspect the daemon for the integration example.
  */
 export function health(options?: _bridgeCallOptions): Promise<Health> {
-  return control.client().health(options);
+  return _bridgeDefaults.client().health(options);
 }
 
 /**
  * Wait with cooperative cancellation.
  */
 export function wait(params: WaitInput, options?: _bridgeCallOptions): Promise<WaitResult> {
-  return control.client().wait(params, options);
+  return _bridgeDefaults.client().wait(params, options);
 }
 

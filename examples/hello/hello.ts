@@ -56,19 +56,31 @@ export class Hello extends _bridgeClient {
 
 }
 
-export const control = new _bridgeDefaultControl<HelloOptions, Hello>((options) => new Hello(options));
+const _bridgeDefaults = new _bridgeDefaultControl<HelloOptions, Hello>((options) => new Hello(options));
+
+export function configure(options: HelloOptions): void {
+  _bridgeDefaults.configure(options);
+}
+
+export function session<R>(options: HelloOptions, callback: (client: Hello) => R | Promise<R>): Promise<R> {
+  return _bridgeDefaults.scope(options, callback);
+}
+
+export function shutdown(): Promise<void> {
+  return _bridgeDefaults.close();
+}
 
 /**
  * Greet with a bounded Go cache shared by calls on this client.
  */
 export function cachedGreet(params: GreetInput, options?: _bridgeCallOptions): Promise<CachedGreeting> {
-  return control.client().cachedGreet(params, options);
+  return _bridgeDefaults.client().cachedGreet(params, options);
 }
 
 /**
  * Greet someone using an ordinary Go function.
  */
 export function greet(params: GreetInput, options?: _bridgeCallOptions): Promise<Greeting> {
-  return control.client().greet(params, options);
+  return _bridgeDefaults.client().greet(params, options);
 }
 
