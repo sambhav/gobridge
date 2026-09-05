@@ -116,12 +116,16 @@ def main():
             "license": args.license or "UNLICENSED",
             "engines": {"node": ">=24"},
         }
-        manifest["dependencies"] = settings(project).get("npm_dependencies", {})
+        dependencies = settings(project).get("npm_dependencies", {})
+        if dependencies:
+            manifest["dependencies"] = dependencies
         if custom:
             manifest["files"] = ["**/*", "!src", "!compiled", "!tsconfig.json"]
         if args.repository:
             manifest["repository"] = {"type": "git", "url": args.repository}
         (stage / "package.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        if dependencies:
+            npm("install", "--ignore-scripts", "--package-lock=false", "--no-audit", "--no-fund", cwd=stage)
         if (project / "LICENSE").is_file():
             shutil.copyfile(project / "LICENSE", stage / "LICENSE")
         (stage / "README.md").write_text(
@@ -168,6 +172,7 @@ def main():
             print("Built", node_target, flush=True)
         if args.dev_output:
             destination = args.dev_output.resolve()
+            shutil.rmtree(stage / "node_modules", ignore_errors=True)
             shutil.rmtree(stage / "src")
             shutil.rmtree(stage / "compiled")
             (stage / "tsconfig.json").unlink()

@@ -22,6 +22,8 @@ import (
 	"github.com/sambhav/gobridge/internal/sourcegen"
 )
 
+var embedPatternTokens = regexp.MustCompile("`[^`]*`|\"(?:[^\"\\\\]|\\\\.)*\"|[^\\s]+")
+
 const devMarker = "gobridge development package v1\n"
 
 type devOptions struct {
@@ -360,7 +362,7 @@ func sourceHashes(output string, packages ...string) (string, string, error) {
 				if !strings.HasPrefix(line, "//go:embed ") && !strings.HasPrefix(line, "//go:embed\t") {
 					continue
 				}
-				for _, pattern := range regexp.MustCompile("`[^`]*`|\"(?:[^\"\\\\]|\\\\.)*\"|[^\\s]+").FindAllString(strings.TrimSpace(strings.TrimPrefix(line, "//go:embed")), -1) {
+				for _, pattern := range embedPatternTokens.FindAllString(strings.TrimSpace(strings.TrimPrefix(line, "//go:embed")), -1) {
 					if strings.HasPrefix(pattern, "\"") || strings.HasPrefix(pattern, "`") {
 						decoded, e := strconv.Unquote(pattern)
 						if e != nil {

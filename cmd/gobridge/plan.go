@@ -22,6 +22,7 @@ type buildPlan struct {
 	Python     bool              `json:"python"`
 	TypeScript bool              `json:"typescript"`
 	Output     string            `json:"output"`
+	Artifacts  []string          `json:"artifacts"`
 	Tools      map[string]string `json:"tools"`
 }
 
@@ -62,6 +63,19 @@ func planBuild(ctx context.Context, p project, targets, output string, python, t
 		}
 		seen[target] = true
 		plan.Targets = append(plan.Targets, target)
+	}
+	wheelTags := map[string]string{
+		"linux-amd64": "manylinux_2_17_x86_64.musllinux_1_2_x86_64", "linux-arm64": "manylinux_2_17_aarch64.musllinux_1_2_aarch64",
+		"darwin-amd64": "macosx_12_0_x86_64", "darwin-arm64": "macosx_12_0_arm64", "windows-amd64": "win_amd64", "windows-arm64": "win_arm64",
+	}
+	if python {
+		for _, target := range plan.Targets {
+			name := regexp.MustCompile(`[-_.]+`).ReplaceAllString(p.PythonDistribution, "_") + "-" + p.Version + "-py3-none-" + wheelTags[target] + ".whl"
+			plan.Artifacts = append(plan.Artifacts, name)
+		}
+	}
+	if typescript {
+		plan.Artifacts = append(plan.Artifacts, "npm/"+strings.ReplaceAll(strings.TrimPrefix(p.NPMPackage, "@"), "/", "-")+"-"+p.Version+".tgz")
 	}
 	for path := plan.Output; ; path = filepath.Dir(path) {
 		info, err := os.Lstat(path)
@@ -131,7 +145,7 @@ func planBuild(ctx context.Context, p project, targets, output string, python, t
 		}
 		return plan, nil
 	}
-	cmd := exec.CommandContext(ctx, "go", "list", "-e", "-json", p.Command)
+	cmd := exec.CommandContext(ctx, "go", "list", "-mod=readonly", "-e", "-json", p.Command)
 	data, err := cmd.Output()
 	if err != nil {
 		return plan, fmt.Errorf("inspect Go command %q: %w", p.Command, err)

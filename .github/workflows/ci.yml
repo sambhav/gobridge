@@ -64,6 +64,7 @@ jobs:
         with:
           node-version: '24'
       - run: python tools/test_workflows.py
+      - run: python tools/test_dev_watch.py
   npm-packages:
     runs-on: ubuntu-latest
     timeout-minutes: 15

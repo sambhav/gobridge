@@ -49,17 +49,18 @@ def main():
         assert "Hello, World!" in run("node", "app.mts").stdout
         source.write_text(original)
         config = json.loads((project / "gobridge.json").read_text())
-        config.update(python_package="python-package", typescript_package="typescript-package", python_requires=["typing-extensions>=4"], npm_dependencies={})
+        config.update(python_package="python-package", typescript_package="typescript-package", python_requires=["typing-extensions>=4"], npm_dependencies={"escape-string-regexp": "5.0.0"})
         (project / "gobridge.json").write_text(json.dumps(config))
         py = project / "python-package"
         ts = project / "typescript-package"
         py.mkdir(); ts.mkdir()
         (py / "__init__.py").write_text('from ._bindings import *\nfrom importlib.resources import files\ndef friendly(name):\n    return greet_sync(name=name) + files(__package__).joinpath("suffix.txt").read_text()\n')
         (py / "suffix.txt").write_text(" wrapped")
-        (ts / "index.ts").write_text('export * from "./generated.js";\nimport {greet} from "./generated.js";\nimport {readFileSync} from "node:fs";\nexport async function friendly(name: string) { return await greet({name}) + readFileSync(new URL("./suffix.txt", import.meta.url), "utf8"); }\n')
+        (ts / "index.ts").write_text('import escapeStringRegexp from "escape-string-regexp";\nexport * from "./generated.js";\nimport {greet} from "./generated.js";\nimport {readFileSync} from "node:fs";\nexport async function friendly(name: string) { return await greet({name: escapeStringRegexp(name)}) + readFileSync(new URL("./suffix.txt", import.meta.url), "utf8"); }\n')
         (ts / "suffix.txt").write_text(" wrapped")
         run(cli, "dev", "--once")
         assert "Hello, Sam! wrapped" in run(sys.executable, "-c", 'from acme.tools.greeter import friendly; print(friendly("Sam"))', env=dict(os.environ, PYTHONPATH=str(project / "build"))).stdout
+        run(shutil.which("npm"), "install", "--ignore-scripts", "--no-audit", "--no-fund", "escape-string-regexp@5.0.0")
         run(cli, "dev", "--typescript", "--once")
         assert "Hello, Sam! wrapped" in run("node", "--input-type=module", "-e", 'import {friendly} from "@acme/greeter"; console.log(await friendly("Sam"));').stdout
         run(cli, "build", "--python", "--typescript", "--targets", target)

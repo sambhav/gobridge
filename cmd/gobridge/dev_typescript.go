@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -23,7 +24,12 @@ func buildDevTypeScript(ctx context.Context, options devOptions, binary string, 
 		}
 	}
 	compiler := filepath.Join(tooling, "typescript", "node_modules", "typescript", "bin", "tsc")
-	if _, err := os.Stat(compiler); os.IsNotExist(err) {
+	lock, err := os.ReadFile(filepath.Join(tooling, "typescript", "package-lock.json"))
+	if err != nil {
+		return err
+	}
+	installed, _ := os.ReadFile(filepath.Join(tooling, "typescript", ".installed-lock"))
+	if _, err := os.Stat(compiler); os.IsNotExist(err) || !bytes.Equal(lock, installed) {
 		name := "npm"
 		args := []string{"ci", "--ignore-scripts"}
 		if runtime.GOOS == "windows" {
@@ -36,6 +42,9 @@ func buildDevTypeScript(ctx context.Context, options devOptions, binary string, 
 		cmd.Stderr = log
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("install TypeScript compiler: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(tooling, "typescript", ".installed-lock"), lock, 0644); err != nil {
+			return err
 		}
 	}
 	interpreter, err := exec.LookPath("python3")

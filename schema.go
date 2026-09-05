@@ -14,6 +14,8 @@ import (
 	"unicode/utf8"
 )
 
+var timestampPattern = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$`)
+
 var pythonKeywords = func() map[string]bool {
 	m := map[string]bool{}
 	for _, n := range strings.Fields("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield self _timeout str int float bool list dict bytes") {
@@ -143,7 +145,7 @@ func validateNode(raw json.RawMessage, t reflect.Type, rules *fieldRules, path s
 		if err := json.Unmarshal(raw, &text); err != nil {
 			return validationAt(path, err)
 		}
-		if !regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$`).MatchString(text) {
+		if !timestampPattern.MatchString(text) {
 			return validationAt(path, fmt.Errorf("expected RFC 3339 timestamp with at most 9 fractional digits"))
 		}
 		var value time.Time

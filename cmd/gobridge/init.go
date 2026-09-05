@@ -77,6 +77,18 @@ func runInit(args []string, log io.Writer) error {
 	// Check the whole file set before writing anything. Never adopt existing files.
 	for path := range files {
 		dest := filepath.Join(*dir, path)
+		for parent := absolute(filepath.Dir(dest)); ; parent = filepath.Dir(parent) {
+			info, e := os.Lstat(parent)
+			if e == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
+				return fmt.Errorf("init destination must not traverse symlinks or files: %s", parent)
+			}
+			if e != nil && !os.IsNotExist(e) {
+				return e
+			}
+			if parent == absolute(*dir) || parent == filepath.Dir(parent) {
+				break
+			}
+		}
 		if _, err := os.Lstat(dest); err == nil {
 			return fmt.Errorf("refusing to overwrite %s", dest)
 		} else if !os.IsNotExist(err) {
