@@ -18,7 +18,7 @@ def main():
 import asyncio, dataclasses, pathlib, textkit
 from textkit import TextKit, AsyncTextKit
 with TextKit() as kit:
-    assert pathlib.Path(kit.command[0]).is_relative_to(pathlib.Path(textkit.__file__).parent)
+    assert pathlib.Path(kit.command[0]).resolve().is_relative_to(pathlib.Path(textkit.__file__).resolve().parent)
     result = kit.analyze(text="bundled binary works")
     assert result.words == 3 and dataclasses.is_dataclass(result)
 async def main():

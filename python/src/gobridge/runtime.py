@@ -9,6 +9,7 @@ import atexit
 import asyncio
 import concurrent.futures as futures
 import dataclasses
+from functools import lru_cache
 import json
 import math
 import os
@@ -77,6 +78,11 @@ def _json_default(value):
 T = typing.TypeVar("T")
 
 
+@lru_cache(maxsize=512)
+def _type_hints(cls):
+    return typing.get_type_hints(cls)
+
+
 def decode(cls: type[T], value: typing.Any) -> T:
     """Reconstruct generated dataclasses, recursively including containers."""
     if value is None:
@@ -85,7 +91,7 @@ def decode(cls: type[T], value: typing.Any) -> T:
     if origin in (types.UnionType, typing.Union):
         return decode(next(t for t in args if t is not type(None)), value)
     if dataclasses.is_dataclass(cls):
-        hints = typing.get_type_hints(cls)
+        hints = _type_hints(cls)
         return cls(**{k: decode(hints[k], v) for k, v in value.items()})
     if origin is list:
         return [decode(args[0], v) for v in value]
@@ -342,13 +348,17 @@ class Client:
     async def acall(self, method: str, params: dict | None = None, *, timeout: float | None = None):
         # Cold process startup/handshake runs off the event loop. Shield it so
         # cancellation cannot abandon an untracked daemon under construction.
-        startup = asyncio.create_task(asyncio.to_thread(self._ensure))
-        try:
-            t = await asyncio.shield(startup)
-        except asyncio.CancelledError:
-            # Retrieve errors if startup finishes after caller cancellation.
-            startup.add_done_callback(lambda done: None if done.cancelled() else done.exception())
-            raise
+        t = self._transport
+        if t is None:
+            startup = asyncio.create_task(asyncio.to_thread(self._ensure))
+            try:
+                t = await asyncio.shield(startup)
+            except asyncio.CancelledError:
+                # Retrieve errors if startup finishes after caller cancellation.
+                startup.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+                raise
+        elif self._closed:
+            raise ClosedError("closed", "client has been closed")
         timeout = self.timeout if timeout is None else timeout
         request_id, f = t.submit(method, {} if params is None else params, timeout)
         af = asyncio.wrap_future(f)
