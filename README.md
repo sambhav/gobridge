@@ -229,7 +229,8 @@ overwritten. The application's `PYTHONPATH` includes the generated package's par
 The watcher restarts its application rather than mutating live imported modules
 or moving state between daemons. Stop it with Ctrl-C. Old binaries remain available
 for existing clients; remove generated output when all development clients have
-stopped. Packaged releases use fixed artifacts.
+stopped. Restart the command after changing project settings. Packaged releases
+use fixed artifacts.
 
 ## 6. Share state deliberately
 

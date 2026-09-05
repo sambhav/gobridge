@@ -253,13 +253,13 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string) error {
 			result = "_bridge_ContextManager[Sync" + class + "]"
 		}
 		fmt.Fprintf(&b, ", _runtime: RuntimeOptions | None = None) -> %s:\n", result)
-		fmt.Fprint(&b, "    _bridge_kwargs = dict(command=command, _runtime=_runtime")
+		fmt.Fprint(&b, "    _bridge_kwargs = {\"command\": command, \"_runtime\": _runtime")
 		if s.Constructor != nil {
 			for _, field := range s.Constructor.Fields {
-				fmt.Fprintf(&b, ", %s=%s", field.Name, field.Name)
+				fmt.Fprintf(&b, ", %q: %s", field.Name, field.Name)
 			}
 		}
-		fmt.Fprint(&b, ")\n")
+		fmt.Fprint(&b, "}\n")
 		switch name {
 		case "configure":
 			fmt.Fprint(&b, "    _bridge_defaults.configure(**_bridge_kwargs)\n\n")

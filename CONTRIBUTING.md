@@ -18,6 +18,9 @@ and pytest with real daemons. The second compiles Node runtime/generated types,
 checks invalid type examples, and tests real Go binaries and malformed peers.
 After building packages, `python tools/test_wheel.py --example greeter` and
 `python tools/test_npm.py` verify clean installs.
+`python tools/test_project_build.py` checks the standalone author CLI from a
+separate Go project, including an independent application package version.
+Pytest also checks source reload, immutable binary revisions and failed builds.
 
 CI covers minimum Go 1.23; Python 3.10/3.12/3.14 and Node 24/26 on Linux, macOS
 and Windows; six-target builds; and native wheel/npm installs. Retain ownership,

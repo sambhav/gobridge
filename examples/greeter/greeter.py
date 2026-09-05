@@ -154,15 +154,15 @@ def welcome_sync(*, name: str, _timeout: float | None = None) -> str:
     return _bridge_decode(str, result)
 
 def configure(command=None, *, prefix: str | None = None, _runtime: RuntimeOptions | None = None) -> None:
-    _bridge_kwargs = dict(command=command, _runtime=_runtime, prefix=prefix)
+    _bridge_kwargs = {"command": command, "_runtime": _runtime, "prefix": prefix}
     _bridge_defaults.configure(**_bridge_kwargs)
 
 def session(command=None, *, prefix: str | None = None, _runtime: RuntimeOptions | None = None) -> _bridge_AsyncContextManager[Greeter]:
-    _bridge_kwargs = dict(command=command, _runtime=_runtime, prefix=prefix)
+    _bridge_kwargs = {"command": command, "_runtime": _runtime, "prefix": prefix}
     return _bridge_defaults.scope_for(Greeter, _bridge_kwargs)
 
 def session_sync(command=None, *, prefix: str | None = None, _runtime: RuntimeOptions | None = None) -> _bridge_ContextManager[SyncGreeter]:
-    _bridge_kwargs = dict(command=command, _runtime=_runtime, prefix=prefix)
+    _bridge_kwargs = {"command": command, "_runtime": _runtime, "prefix": prefix}
     _bridge_require_sync()
     return _bridge_defaults.scope_for(SyncGreeter, _bridge_kwargs, asynchronous=False)
 

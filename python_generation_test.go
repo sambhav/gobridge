@@ -11,6 +11,7 @@ import (
 
 type generationOptions struct {
 	Initial       int     `json:"initial"`
+	Dict          string  `json:"dict"`
 	Options       string  `json:"options"`
 	ResolveBinary string  `json:"resolve_binary"`
 	Timeout       int     `json:"timeout"`
@@ -76,6 +77,7 @@ class Client:
 class AsyncClient(Client): pass
 class DefaultControl:
     def __init__(self, factory): self.factory, self.instance = factory, None
+    def configure(self, **kwargs): self.config = kwargs
     def client(self):
         assert self.instance is not None
         return self.instance
@@ -114,21 +116,23 @@ assert inspect.signature(module.echo).return_annotation == "int"
 assert inspect.signature(module.do_nothing).return_annotation == "None"
 assert inspect.signature(module.roundtrip).return_annotation == "list[int] | None"
 
-client = module.SyncExample(initial=10, options="custom", resolve_binary="provider", timeout=17)
+client = module.SyncExample(initial=10, dict="map", options="custom", resolve_binary="provider", timeout=17)
 assert client.command == ["bundled-example"]
 assert client.kwargs["timeout"] == 30
-assert client.kwargs["init"] == {"initial": 10, "options": "custom", "resolve_binary": "provider", "timeout": 17, "label": None}
+assert client.kwargs["init"] == {"initial": 10, "dict": "map", "options": "custom", "resolve_binary": "provider", "timeout": 17, "label": None}
 assert client.echo(value=0) == 0
 assert client.do_nothing() is None
 assert client.roundtrip(values=[1, 2]) == [1, 2]
 assert client.describe_names(decode="safe", control=2, result=False) == "safe:2"
 assert client.record_value(record=module.record(value="go")) == module.record(value="go")
+module.configure(initial=10, dict="map", options="custom", resolve_binary="provider", timeout=17)
+assert module._bridge_defaults.config["dict"] == "map"
 module._bridge_defaults.instance = client
 assert module.echo_sync(value=0) == 0
 assert module.describe_names_sync(decode="module", control=3, result=False) == "module:3"
 assert asyncio.run(module.describe_names(decode="async", control=4, result=False)) == "async:4"
 assert asyncio.run(module.do_nothing()) is None
-async_client = module.Example(initial=10, options="custom", resolve_binary="provider", timeout=17)
+async_client = module.Example(initial=10, dict="map", options="custom", resolve_binary="provider", timeout=17)
 assert asyncio.run(async_client.echo(value=2)) == 2
 `
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

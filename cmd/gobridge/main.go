@@ -2,18 +2,33 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/sambhav/gobridge/internal/sourcegen"
 )
 
 func run(args []string, stderr io.Writer) error {
+	return runContext(context.Background(), args, stderr)
+}
+
+func runContext(ctx context.Context, args []string, stderr io.Writer) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprintln(stderr, "Usage: gobridge generate [--dir .] [--output zz_gobridge.gen.go] [--check]")
+		fmt.Fprintln(stderr, "       gobridge dev [--once] [--python build/<name>] [-- python app.py]")
+		fmt.Fprintln(stderr, "       gobridge build [--python] [--typescript] [--output dist]")
 		return nil
+	}
+	if args[0] == "dev" {
+		return runDev(ctx, args[1:], stderr)
+	}
+	if args[0] == "build" {
+		return runBuild(ctx, args[1:], stderr)
 	}
 	if args[0] != "generate" {
 		return fmt.Errorf("unknown command %q; use gobridge generate", args[0])
@@ -39,7 +54,9 @@ func run(args []string, stderr io.Writer) error {
 }
 
 func main() {
-	if err := run(os.Args[1:], os.Stderr); err != nil {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	if err := runContext(ctx, os.Args[1:], os.Stderr); err != nil && ctx.Err() == nil {
 		fmt.Fprintln(os.Stderr, "gobridge:", err)
 		os.Exit(1)
 	}
