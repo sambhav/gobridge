@@ -93,7 +93,7 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string) error {
 	for _, n := range strings.Fields("Client AsyncClient RuntimeOptions DefaultControl decode dataclass resolve_binary control aio str int float bool dict list") {
 		reserved[n] = true
 	}
-	if reserved[class] {
+	if reserved[class] || pythonReserved[class] {
 		return fmt.Errorf("class %s conflicts with generated symbols", class)
 	}
 	reserved[class], reserved["Async"+class] = true, true

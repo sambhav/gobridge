@@ -174,3 +174,17 @@ func TestPythonGenerationRejectsSymbolAndSchemaCollisions(t *testing.T) {
 		}
 	})
 }
+
+func TestPythonClassNameRejectsKeywords(t *testing.T) {
+	for _, name := range []string{"None", "True", "False"} {
+		t.Run(name, func(t *testing.T) {
+			var out strings.Builder
+			if err := New().GeneratePython(&out, name, "example"); err == nil {
+				t.Fatal("accepted a class name that produces invalid Python syntax")
+			}
+			if out.Len() != 0 {
+				t.Fatal("failed generation wrote partial output")
+			}
+		})
+	}
+}
