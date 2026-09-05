@@ -51,6 +51,47 @@ JSON alongside any published summary. CI uploads a bounded smoke report but
 does not fail on timing thresholds or attempt to prove performance gains on
 shared runners.
 
+## Initial optimization results
+
+The initial Linux x86-64 comparison used Go 1.27.1, Python 3.12.13, Node
+24.19.0, and an eight-CPU quota. These are local observations, not performance
+guarantees. The full sweep used 500 calls and three repeats per scenario;
+[repeat-level results](benchmarks/initial-comparison.json) retain both gains
+and regressions. Full raw samples are produced by the runner; they are not
+checked into the repository.
+
+Go microbenchmarks (median of five 500 ms runs):
+
+| Benchmark | Before | After | Allocations/call |
+| --- | ---: | ---: | ---: |
+| Call | 4,427 ns | 2,967 ns | 16 → 9 |
+| BindCall | 6,536 ns | 4,469 ns | 20 → 13 |
+
+Strict structural validation remains in place. Using `json.Unmarshal` for the
+subsequent typed decode removes streaming-decoder overhead; differential fuzz
+tests compare behavior against the previous decoder.
+
+Python nested-model throughput improved 29–47% across sync/async clients and
+the four concurrency levels in this sweep. At concurrency one, sync improved
+from 988 to 1,452 calls/s and async from 972 to 1,310 calls/s. The changes avoid
+recursive dataclass deep copies during encoding and cache bounded, type-specific
+decoding plans. Tiny-call results were mixed: this is not a universal speedup.
+
+TypeScript results were also mixed. An apparent nested-case slowdown in the
+initial sweep did not reproduce in an alternating old/new daemon experiment
+(2,000 calls, five repeats): median serial throughput was essentially flat
+(1,547 → 1,546 calls/s), and concurrency 32 changed from 2,565 to 2,764 calls/s.
+The spread is substantial; do not treat the latter as a guaranteed 8% gain.
+[Paired results](benchmarks/typescript-paired.json) preserve every repeat.
+`GOBRIDGE_BENCH_BINARY` selects a prebuilt daemon in `tools/bench_node.mjs`
+for comparisons using the same generated client.
+
+Native handler code is unchanged. Its tiny-case throughput varied heavily
+with scheduling and timer overhead at this sample size, so those differences
+are not evidence of an optimization. Use longer runs and alternate comparison
+order before making release-level performance claims. Python sync throughput
+also includes worker-pool startup, which matters for short concurrent runs.
+
 ## Fuzz and stress
 
 ```sh

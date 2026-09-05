@@ -1,0 +1,189 @@
+{
+  "notes": [
+    "Nested TypeScript workload, 2000 calls per repeat, five repeats per version; order alternated AB/BA.",
+    "Same generated client and benchmark harness; GOBRIDGE_BENCH_BINARY selected daemon built from main 6cc3c4f or optimized 4b5dccd, using identical perf fixture.",
+    "Throughput differences are exploratory, not confidence intervals or CI performance gates."
+  ],
+  "results": [
+    {
+      "version": "before",
+      "repeat": 0,
+      "concurrency": 1,
+      "calls_per_second": 1546.8634917223374,
+      "p50_us": 537.0729999999639,
+      "p95_us": 1014.2309999998815,
+      "p99_us": 2362.2310000000653
+    },
+    {
+      "version": "after",
+      "repeat": 0,
+      "concurrency": 1,
+      "calls_per_second": 1513.000571643389,
+      "p50_us": 565.8879999999726,
+      "p95_us": 1036.9459999999435,
+      "p99_us": 2186.0019999999167
+    },
+    {
+      "version": "after",
+      "repeat": 1,
+      "concurrency": 1,
+      "calls_per_second": 1545.982479216689,
+      "p50_us": 529.2309999999816,
+      "p95_us": 1241.4280000000417,
+      "p99_us": 2763.5440000000244
+    },
+    {
+      "version": "before",
+      "repeat": 1,
+      "concurrency": 1,
+      "calls_per_second": 1653.8751196241667,
+      "p50_us": 515.1969999999437,
+      "p95_us": 954.7230000000582,
+      "p99_us": 1988.798000000088
+    },
+    {
+      "version": "before",
+      "repeat": 2,
+      "concurrency": 1,
+      "calls_per_second": 1641.696516013242,
+      "p50_us": 534.821000000079,
+      "p95_us": 958.9809999999943,
+      "p99_us": 1710.8200000000124
+    },
+    {
+      "version": "after",
+      "repeat": 2,
+      "concurrency": 1,
+      "calls_per_second": 1564.9256163663958,
+      "p50_us": 550.9680000000117,
+      "p95_us": 1003.8959999999406,
+      "p99_us": 2015.051000000085
+    },
+    {
+      "version": "after",
+      "repeat": 3,
+      "concurrency": 1,
+      "calls_per_second": 1535.3413469144305,
+      "p50_us": 530.1110000000335,
+      "p95_us": 1147.3459999999704,
+      "p99_us": 2657.799999999952
+    },
+    {
+      "version": "before",
+      "repeat": 3,
+      "concurrency": 1,
+      "calls_per_second": 1476.6293474489332,
+      "p50_us": 576.2789999999995,
+      "p95_us": 1140.1539999999386,
+      "p99_us": 2198.2539999999062
+    },
+    {
+      "version": "before",
+      "repeat": 4,
+      "concurrency": 1,
+      "calls_per_second": 1546.9167318615368,
+      "p50_us": 551.5859999998156,
+      "p95_us": 1068.6959999999317,
+      "p99_us": 2213.5399999999663
+    },
+    {
+      "version": "after",
+      "repeat": 4,
+      "concurrency": 1,
+      "calls_per_second": 1703.7552562457574,
+      "p50_us": 518.9940000000206,
+      "p95_us": 890.8859999999095,
+      "p99_us": 1642.368999999917
+    },
+    {
+      "version": "before",
+      "repeat": 0,
+      "concurrency": 32,
+      "calls_per_second": 2564.725739847588,
+      "p50_us": 10133.660999999847,
+      "p95_us": 26272.73700000001,
+      "p99_us": 33372.92000000002
+    },
+    {
+      "version": "after",
+      "repeat": 0,
+      "concurrency": 32,
+      "calls_per_second": 2689.994138018574,
+      "p50_us": 9554.047999999966,
+      "p95_us": 22663.54200000001,
+      "p99_us": 32820.53799999994
+    },
+    {
+      "version": "after",
+      "repeat": 1,
+      "concurrency": 32,
+      "calls_per_second": 2348.930954426575,
+      "p50_us": 9679.827000000045,
+      "p95_us": 26303.90800000009,
+      "p99_us": 99827.855
+    },
+    {
+      "version": "before",
+      "repeat": 1,
+      "concurrency": 32,
+      "calls_per_second": 2537.9975316984182,
+      "p50_us": 10190.37000000003,
+      "p95_us": 26955.34400000008,
+      "p99_us": 51462.195000000065
+    },
+    {
+      "version": "before",
+      "repeat": 2,
+      "concurrency": 32,
+      "calls_per_second": 2224.6881555613722,
+      "p50_us": 10575.955000000022,
+      "p95_us": 34047.34600000006,
+      "p99_us": 67952.79400000004
+    },
+    {
+      "version": "after",
+      "repeat": 2,
+      "concurrency": 32,
+      "calls_per_second": 3189.9187950028163,
+      "p50_us": 8492.591000000062,
+      "p95_us": 22105.963000000087,
+      "p99_us": 29507.53199999997
+    },
+    {
+      "version": "after",
+      "repeat": 3,
+      "concurrency": 32,
+      "calls_per_second": 2764.2088294756477,
+      "p50_us": 9458.241000000044,
+      "p95_us": 26624.217000000044,
+      "p99_us": 38484.94700000004
+    },
+    {
+      "version": "before",
+      "repeat": 3,
+      "concurrency": 32,
+      "calls_per_second": 2715.9256417908146,
+      "p50_us": 9745.078000000149,
+      "p95_us": 23517.919000000005,
+      "p99_us": 43546.40499999993
+    },
+    {
+      "version": "before",
+      "repeat": 4,
+      "concurrency": 32,
+      "calls_per_second": 2997.8287550729915,
+      "p50_us": 8878.211999999849,
+      "p95_us": 21731.18599999998,
+      "p99_us": 30836.822999999982
+    },
+    {
+      "version": "after",
+      "repeat": 4,
+      "concurrency": 32,
+      "calls_per_second": 3164.8514985294128,
+      "p50_us": 8447.983000000022,
+      "p95_us": 22618.31399999994,
+      "p99_us": 30459.284000000025
+    }
+  ]
+}
