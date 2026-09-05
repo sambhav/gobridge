@@ -32,7 +32,7 @@ def module_default():
     ["--json", '{"name":"世界"}'],
 ])
 def test_hello_cli_and_binding_agree(arguments):
-    output = subprocess.check_output([str(BINARY), "greet", *arguments], text=True)
+    output = subprocess.check_output([str(BINARY), "greet", *arguments], text=True, encoding="utf-8")
     with Hello(str(BINARY)) as hello:
         result = hello.greet(name="世界")
         assert isinstance(result, Greeting)
