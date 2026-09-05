@@ -34,7 +34,9 @@ func (g *Greeter) Welcome(name string) string {
 Run the generator and get a `NewGobridge() (*gobridge.Registry, error)` function
 in the same package. A tiny main calls `NewGobridge`, checks its error, and runs
 `registry.Main()`. A normal Go library can call `NewGobridge` from a separate
-command package, keeping business logic independent of the CLI entrypoint.
+command package, keeping business logic independent of the CLI entrypoint. Go
+consumers import the library package and call its ordinary functions and methods
+directly; see [GO_CONSUMER.md](GO_CONSUMER.md) for a complete native Go example.
 
 The generator reads Go declarations with the standard Go parser. Parameter names
 come from source and become snake_case (`userID` becomes `user_id`), and methods
@@ -75,7 +77,7 @@ From the repository root:
 
 ```sh
 go generate ./examples/annotated
-go run ./examples/annotated --config '{"prefix":"Hey, "}' welcome --name World
+go run ./examples/annotated/cmd/annotated --config '{"prefix":"Hey, "}' welcome --name World
 go run ./cmd/gobridge generate --dir examples/annotated --check
 ```
 
@@ -85,6 +87,11 @@ adapter is up to date. The example includes a plain `greet` function, configured
 `welcome` method, typed `stats` result, and a `reset` method returning no value.
 Its atomic counter demonstrates that concurrent calls share the owning Go
 instance safely.
+
+The annotated declarations live in importable package `greeter` at
+`examples/annotated`. Its executable entrypoint lives in
+`examples/annotated/cmd/annotated`; build that command package for CLI, daemon,
+and Python wheel use. Native Go consumers import the library package directly.
 
 Install the generator from this checkout, then add the directive from the
 opening example to your own project:
