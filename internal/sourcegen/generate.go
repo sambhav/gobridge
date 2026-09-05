@@ -92,7 +92,8 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 		if !match {
 			continue
 		}
-		file, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ParseComments)
+		// We inspect declarations and import aliases, never ast.Ident.Obj/Scope.
+		file, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ParseComments|parser.SkipObjectResolution)
 		if err != nil {
 			return nil, err
 		}

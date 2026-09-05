@@ -2,6 +2,24 @@
 from pathlib import Path
 import re
 import struct
+import shutil
+import subprocess
+
+
+def build_go_binary(destination, package, project, env, *, cache=None, trimpath=False):
+    """Reuse link outputs, while Go still validates source/flags on every build."""
+    destination = Path(destination)
+    output = destination
+    if cache is not None:
+        target = (env.get("GOOS") or "host") + "-" + (env.get("GOARCH") or "host")
+        output = Path(cache).resolve() / (target + ("-trimpath" if trimpath else "")) / destination.name
+        output.parent.mkdir(parents=True, exist_ok=True)
+    command = ["go", "build"]
+    if trimpath:
+        command.append("-trimpath")
+    subprocess.run([*command, "-o", str(output), package], cwd=project, env=env, check=True)
+    if output != destination:
+        shutil.copyfile(output, destination)
 
 
 def python_version(root):

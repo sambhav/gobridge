@@ -19,7 +19,7 @@ import subprocess
 import tempfile
 
 from package_customization import copy_package, python_requirements
-from packaging_common import python_version, validate_static_linux
+from packaging_common import build_go_binary, python_version, validate_static_linux
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT
@@ -97,6 +97,7 @@ def main():
     global PROJECT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--targets", nargs="+", choices=TARGETS, default=list(TARGETS))
+    parser.add_argument("--build-cache", type=Path, help="reuse Go link outputs; Go still checks sources and flags")
     parser.add_argument("--go-package", default="./examples/greeter/cmd/greeter", help="Go command package to build")
     parser.add_argument("--package", default="greeter", help="Python import package, optionally dotted (acme.greeter)")
     parser.add_argument("--class", dest="client_class", default="Greeter", help="Generated Python client class")
@@ -128,7 +129,9 @@ def main():
         temp = Path(tmp)
         host = temp / (args.binary + (".exe" if os.name == "nt" else ""))
         host_env = {key: value for key, value in os.environ.items() if key not in {"GOOS", "GOARCH"}}
-        run("go", "build", "-o", str(host), args.go_package, env=host_env)
+        host_env["CGO_ENABLED"] = "0"
+        build_go_binary(host, args.go_package, PROJECT, host_env, cache=args.build_cache)
+        host.chmod(0o755)
         bindings = subprocess.check_output([str(host), "generate-python", "--class", args.client_class, "--binary", args.binary])
         for target in args.targets:
             goos, goarch, tag = TARGETS[target]
@@ -150,7 +153,7 @@ def main():
             (package / "py.typed").write_text("")
             binary = binary_dir / (args.binary + (".exe" if goos == "windows" else ""))
             env = dict(os.environ, GOOS=goos, GOARCH=goarch, CGO_ENABLED="0")
-            run("go", "build", "-trimpath", "-o", str(binary), args.go_package, env=env)
+            build_go_binary(binary, args.go_package, PROJECT, env, cache=args.build_cache, trimpath=True)
             binary.chmod(0o755)
             if goos == "linux":
                 validate_static_linux(binary, goarch)

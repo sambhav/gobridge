@@ -140,6 +140,76 @@ export function encode(type: WireType, value: unknown): unknown {
   return transform(type, value, true, "params");
 }
 
+type Converter = (value: unknown, path: string) => unknown;
+
+/** Compile an immutable schema snapshot once; generated clients reuse it.
+ * No eval or generated executable strings are used. Generic encode/decode
+ * remain available for callers that deliberately change schemas between calls.
+ */
+export function compileCodec<T = unknown>(type: WireType): {
+  encode(value: unknown): unknown;
+  decode(value: unknown): T;
+} {
+  const compile = (type: WireType, input: boolean): Converter => {
+    const fail = (path: string, message: string): never => {
+      const ErrorType = input ? InvalidArgumentError : DaemonError;
+      throw new ErrorType(input ? "invalid_argument" : "protocol", `${path}: ${message}`);
+    };
+    if (type.kind === "ptr") {
+      const child = compile(type.elem!, input);
+      return (value, path) => value === null ? null : child(value, path);
+    }
+    if (type.kind === "slice") {
+      const child = compile(type.elem!, input);
+      return (value, path) => {
+        if (value === null) return null;
+        if (!Array.isArray(value)) return fail(path, "expected an array or null");
+        return value.map((item, i) => child(item, `${path}[${i}]`));
+      };
+    }
+    if (type.kind === "map") {
+      const child = compile(type.elem!, input);
+      return (value, path) => {
+        if (value === null) return null;
+        if (!record(value)) return fail(path, "expected an object or null");
+        return Object.fromEntries(Object.entries(value).map(([key, item]) =>
+          [key, child(item, `${path}[${JSON.stringify(key)}]`)]));
+      };
+    }
+    if (type.kind === "struct") {
+      const fields = (type.fields ?? []).map(field => ({
+        name: input ? camelCase(field.name) : field.name,
+        output: input ? field.name : camelCase(field.name),
+        optional: field.type.kind === "ptr",
+        convert: compile(field.type, input),
+      }));
+      const allowed = new Set(fields.map(field => field.name));
+      return (value, path) => {
+        if (!record(value)) return fail(path, "expected an object");
+        for (const key of Object.keys(value)) if (!allowed.has(key)) return fail(path, `unknown field ${key}`);
+        const output: Record<string, unknown> = {};
+        for (const field of fields) {
+          if (!Object.hasOwn(value, field.name) || (input && value[field.name] === undefined)) {
+            if (field.optional) continue;
+            return fail(path, `missing field ${field.name}`);
+          }
+          const converted = field.convert(value[field.name], `${path}.${field.name}`);
+          if (field.output === "__proto__") {
+            Object.defineProperty(output, field.output, {value: converted, enumerable: true, writable: true, configurable: true});
+          } else {
+            output[field.output] = converted;
+          }
+        }
+        return output;
+      };
+    }
+    const scalar = {kind: type.kind};
+    return (value, path) => transform(scalar, value, input, path);
+  };
+  const encoder = compile(type, true), decoder = compile(type, false);
+  return {encode: value => encoder(value, "params"), decode: value => decoder(value, "result") as T};
+}
+
 /** Reconstruct typed camelCase objects and exact int64 bigint values. */
 export function decode<T>(type: WireType, value: unknown): T {
   return transform(type, value, false, "result") as T;
