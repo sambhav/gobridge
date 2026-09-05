@@ -66,22 +66,16 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 	if err != nil {
 		return err
 	}
-	lookup := exec.CommandContext(ctx, "go", "list", "-m", "-f", "{{.Dir}}", "github.com/sambhav/gobridge")
-	lookup.Stderr = log
-	location, err := lookup.Output()
+	source, err := moduleRoot(ctx, log)
 	if err != nil {
-		return fmt.Errorf("locate gobridge build tools in this Go module: %w", err)
-	}
-	source := strings.TrimSpace(string(location))
-	if source == "" {
-		return fmt.Errorf("gobridge module source is unavailable")
+		return err
 	}
 	stage, err := os.MkdirTemp("", "gobridge-build-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	for _, path := range []string{"LICENSE", "python/pyproject.toml", "python/src", "typescript/src", "typescript/package.json", "typescript/package-lock.json", "typescript/tsconfig.json", "typescript/LICENSE", "typescript/README.md", "tools/build_wheels.py", "tools/build_npm.py"} {
+	for _, path := range []string{"LICENSE", "python/pyproject.toml", "python/README.md", "python/LICENSE", "python/src", "typescript/src", "typescript/package.json", "typescript/package-lock.json", "typescript/tsconfig.json", "typescript/LICENSE", "typescript/README.md", "tools/build_wheels.py", "tools/build_npm.py", "tools/packaging_common.py"} {
 		if err := copyBuildAsset(source, stage, path); err != nil {
 			return err
 		}
@@ -100,7 +94,7 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		command.Stderr = log
 		return command.Run()
 	}
-	common := []string{"--project", root, "--go-package", p.Command, "--class", p.Class, "--binary", p.Name, "--version", p.Version}
+	common := []string{"--project", root, "--go-package", p.Command, "--class", p.Class, "--binary", p.Name, "--version", p.Version, "--repository", p.Repository, "--license", p.License}
 	targetArgs := []string{}
 	if *targets != "all" {
 		targetArgs = append(targetArgs, "--targets")
@@ -111,7 +105,7 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		argv = append(argv, "--package", p.Name, "--distribution", p.PythonDistribution, "--output", absolute(*output))
 		argv = append(argv, targetArgs...)
 		if err := execute(interpreter, argv...); err != nil {
-			return fmt.Errorf("wheel build: %w (install setuptools and wheel in the build Python environment)", err)
+			return fmt.Errorf("wheel build: %w", err)
 		}
 	}
 	if *typescript {

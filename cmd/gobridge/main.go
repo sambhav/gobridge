@@ -8,16 +8,34 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
+	"strings"
 	"syscall"
 
 	"github.com/sambhav/gobridge/internal/sourcegen"
 )
+
+var version string
+
+func toolVersion() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return strings.TrimPrefix(info.Main.Version, "v")
+	}
+	return "dev"
+}
 
 func run(args []string, stderr io.Writer) error {
 	return runContext(context.Background(), args, stderr)
 }
 
 func runContext(ctx context.Context, args []string, stderr io.Writer) error {
+	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
+		fmt.Fprintln(stderr, "gobridge", toolVersion())
+		return nil
+	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprintln(stderr, "Usage: gobridge generate [--dir .] [--output zz_gobridge.gen.go] [--check]")
 		fmt.Fprintln(stderr, "       gobridge dev [--once] [--python build/<name>] [-- python app.py]")
@@ -31,7 +49,7 @@ func runContext(ctx context.Context, args []string, stderr io.Writer) error {
 		return runBuild(ctx, args[1:], stderr)
 	}
 	if args[0] != "generate" {
-		return fmt.Errorf("unknown command %q; use gobridge generate", args[0])
+		return fmt.Errorf("unknown command %q; use gobridge --help", args[0])
 	}
 	flags := flag.NewFlagSet("generate", flag.ContinueOnError)
 	flags.SetOutput(stderr)

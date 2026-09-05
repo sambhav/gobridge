@@ -3,6 +3,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -19,6 +25,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
@@ -37,6 +46,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
@@ -49,9 +61,19 @@ jobs:
           node-version: '24'
       - run: npm ci --ignore-scripts
         working-directory: typescript
+      - name: Set reproducible artifact timestamp
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
       - run: go run ./cmd/gobridge build --typescript
-      - run: python -m pip install setuptools wheel
+      - run: python -m pip install setuptools==80.9.0 wheel==0.45.1 twine==6.2.0
       - run: python tools/test_project_build.py
+      - run: python tools/check_versions.py
+      - run: python tools/test_release.py
+      - name: Verify all six CLI release archives without publishing
+        run: python tools/release.py prepare --tag "v$(cat version.txt)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-release-preview
+          path: release-artifacts/*
       - uses: actions/upload-artifact@v4
         with:
           name: npm-packages
@@ -66,6 +88,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -81,6 +106,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
@@ -107,6 +135,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
@@ -125,6 +156,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -139,6 +173,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
@@ -151,6 +188,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
@@ -158,11 +198,40 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install setuptools wheel
+      - run: python -m pip install setuptools==80.9.0 wheel==0.45.1 twine==6.2.0
+      - name: Set reproducible artifact timestamp
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
       - run: python tools/build_wheels.py
       - run: python tools/build_wheels.py --go-package ./examples/hello --package hello --class Hello --binary hello --distribution gobridge-hello-example
       - run: go run ./cmd/gobridge build --python
+      - run: python -m twine check --strict dist/*.whl
       - uses: actions/upload-artifact@v4
         with:
           name: wheels
           path: dist/*.whl
+
+  linux-wheel-compatibility:
+    needs: wheels
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: python:3.12-alpine
+            python: python
+          - image: quay.io/pypa/manylinux2014_x86_64
+            python: /opt/python/cp310-cp310/bin/python
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: dist
+      - name: Install and call the wheel on the target libc
+        env:
+          TEST_IMAGE: ${{ matrix.image }}
+          TEST_PYTHON: ${{ matrix.python }}
+        run: docker run --rm -v "$PWD:/project:ro" --workdir /project "$TEST_IMAGE" "$TEST_PYTHON" tools/test_wheel.py --example greeter

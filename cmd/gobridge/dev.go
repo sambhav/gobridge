@@ -196,6 +196,10 @@ func buildDev(ctx context.Context, options devOptions, log io.Writer) error {
 	if err != nil {
 		return err
 	}
+	bindings, err = bundlePython(ctx, options.output, bindings, log)
+	if err != nil {
+		return err
+	}
 	binaryDir := filepath.Join(options.output, "_bin")
 	if err := os.MkdirAll(binaryDir, 0755); err != nil {
 		return err

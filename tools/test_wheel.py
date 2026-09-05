@@ -26,7 +26,8 @@ def main():
         python = env / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         subprocess.run([str(python), "-m", "pip", "install", "--disable-pip-version-check", "--no-index", "--find-links", str(ROOT / "dist"), f"gobridge-{args.example}-example"], check=True)
         subprocess.run([str(python), "-c", f'''
-import asyncio, dataclasses, importlib, pathlib
+import asyncio, dataclasses, importlib, importlib.util, pathlib
+assert importlib.util.find_spec("gobridge") is None, "consumer must not need a core install"
 package = importlib.import_module({args.example!r})
 SyncClient = getattr(package, "Sync" + {client_class!r})
 AsyncClient = getattr(package, {client_class!r})

@@ -1,8 +1,7 @@
-# gobridge-runtime
+# gobridge Node runtime source
 
-Dependency-free Node 24+ runtime for generated Go bindings, published as ESM
-JavaScript and declarations. Generated packages provide application functions,
-classes and bundled executables.
+Generated packages include this runtime privately. It has no production
+dependencies and is not published as a separate npm package.
 
-See the [user guide](https://github.com/sambhav/gobridge/blob/feat/go-cli-python/README.md#7-use-typescript)
-or [development checks](https://github.com/sambhav/gobridge/blob/feat/go-cli-python/CONTRIBUTING.md).
+See the [progressive guide](https://github.com/sambhav/gobridge#readme) for
+installation, TypeScript usage, and self-contained package building.

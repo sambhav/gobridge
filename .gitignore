@@ -50,3 +50,5 @@ node_modules/
 
 # Generated development packages and local applications.
 /build/
+
+/release-artifacts/

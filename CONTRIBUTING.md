@@ -2,7 +2,7 @@
 
 The [README](README.md) is the single user guide. Keep examples progressive and
 put implementation notes here. Document APIs before implementing them, regenerate
-examples, and keep draft PR increments reviewable. 
+examples, and keep draft PR increments reviewable.
 
 ## Verify a change
 

@@ -54,6 +54,8 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "dist" / "npm", help="Tarball output directory")
     parser.add_argument("--project", type=Path, default=ROOT, help="Go project directory")
     parser.add_argument("--version", help="Application package version")
+    parser.add_argument("--repository", default="", help="Application source repository URL")
+    parser.add_argument("--license", default="", help="Application license identifier")
     args = parser.parse_args()
     project = args.project.resolve()
     if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", args.client_class):
@@ -72,8 +74,6 @@ def main():
     runtime_manifest = json.loads((RUNTIME / "package.json").read_text())
     runtime_version = runtime_manifest["version"]
     version = args.version or runtime_version
-    npm("run", "build", cwd=RUNTIME)
-    runtime_tarball = pack(RUNTIME, output)
     with tempfile.TemporaryDirectory(prefix="gobridge-npm-") as temp:
         temporary = Path(temp)
         host = temporary / (args.binary + (".exe" if os.name == "nt" else ""))
@@ -86,7 +86,8 @@ def main():
         stage = temporary / "package"
         source = stage / "src"
         source.mkdir(parents=True)
-        (source / "index.ts").write_bytes(bindings)
+        shutil.copytree(RUNTIME / "src", source / "_gobridge")
+        (source / "index.ts").write_bytes(bindings.replace(b'from "gobridge-runtime"', b'from "./_gobridge/index.js"'))
         manifest = {
             "name": args.package,
             "version": version,
@@ -95,22 +96,21 @@ def main():
             "main": "./index.js",
             "types": "./index.d.ts",
             "exports": {".": {"types": "./index.d.ts", "import": "./index.js"}},
-            "files": ["index.js", "index.d.ts", "_bin", "LICENSE", "README.md"],
-            "license": "Apache-2.0",
+            "files": ["index.js", "index.d.ts", "_bin", "_gobridge", "LICENSE", "README.md"],
+            "license": args.license or "UNLICENSED",
             "engines": {"node": ">=24"},
-            "dependencies": {"gobridge-runtime": runtime_version},
         }
+        if args.repository:
+            manifest["repository"] = {"type": "git", "url": args.repository}
         (stage / "package.json").write_text(json.dumps(manifest, indent=2) + "\n")
-        shutil.copyfile(ROOT / "LICENSE", stage / "LICENSE")
+        if (project / "LICENSE").is_file():
+            shutil.copyfile(project / "LICENSE", stage / "LICENSE")
         (stage / "README.md").write_text(
             f"# {args.package}\n\nGenerated bindings and bundled Go executables. "
             f"Import `{args.client_class}` to create an isolated client, or import "
             "an operation directly to use the lazy default client.\n\n"
             "Requires Node.js 24 or newer. No Go toolchain is needed by consumers.\n"
         )
-        # Compile against the actual packed runtime, keeping its public .d.ts
-        # boundary honest. --no-save preserves the exact release dependency.
-        npm("install", "--ignore-scripts", "--offline", "--no-audit", "--no-fund", "--no-save", "--package-lock=false", str(runtime_tarball), cwd=stage)
         config = {
             "compilerOptions": {
                 "target": "ES2022", "lib": ["ESNext"],
@@ -125,6 +125,8 @@ def main():
         subprocess.run(["node", str(compiler), "-p", str(stage / "tsconfig.json")], cwd=stage, check=True)
         for filename in ("index.js", "index.d.ts"):
             shutil.copyfile(stage / "compiled" / filename, stage / filename)
+        shutil.copytree(stage / "compiled" / "_gobridge", stage / "_gobridge")
+        shutil.copyfile(ROOT / "LICENSE", stage / "_gobridge" / "LICENSE")
         for target in args.targets:
             goos, goarch, node_target = TARGETS[target]
             binary_dir = stage / "_bin" / node_target

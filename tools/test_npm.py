@@ -16,15 +16,10 @@ def main():
     parser.add_argument("--directory", type=Path, default=ROOT / "dist" / "npm", help="Local npm tarball directory")
     args = parser.parse_args()
     version = json.loads((ROOT / "typescript" / "package.json").read_text())["version"]
-    runtime = args.directory.resolve() / f"gobridge-runtime-{version}.tgz"
     example = args.directory.resolve() / f"gobridge-greeter-example-{version}.tgz"
-    for package in (runtime, example):
+    for package in (example,):
         if not package.is_file():
             parser.error(f"missing {package}; run tools/build_npm.py first")
-    with tarfile.open(runtime, "r:gz") as archive:
-        manifest = json.load(archive.extractfile("package/package.json"))
-        if manifest.get("dependencies"):
-            raise RuntimeError("runtime npm package must not have production dependencies")
     with tempfile.TemporaryDirectory(prefix="gobridge-node-install-") as temp:
         project = Path(temp)
         (project / "package.json").write_text(json.dumps({"name": "gobridge-install-check", "private": True, "type": "module"}) + "\n")
@@ -33,7 +28,7 @@ def main():
             parser.error("npm is required; install Node.js 24 or newer")
         subprocess.run([
             executable, "install", "--ignore-scripts", "--offline", "--no-audit", "--no-fund",
-            str(runtime), str(example),
+            str(example),
         ], cwd=project, check=True)
         (project / "check.mjs").write_text('''
 import assert from "node:assert/strict";
@@ -42,16 +37,15 @@ import { constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Greeter, configure, session, shutdown, greet, welcome, stats } from "gobridge-greeter-example";
-import { resolveBinary } from "gobridge-runtime";
 
 const moduleURL = import.meta.resolve("gobridge-greeter-example");
 const packageRoot = dirname(fileURLToPath(moduleURL));
 const binaryName = process.platform === "win32" ? "greeter.exe" : "greeter";
 const packagedBinary = join(packageRoot, "_bin", `${process.platform}-${process.arch}`, binaryName);
 await access(packagedBinary, process.platform === "win32" ? constants.F_OK : constants.X_OK);
-assert.equal(resolveBinary(moduleURL, "greeter"), packagedBinary);
+await access(join(packageRoot, "_gobridge", "LICENSE"));
 const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-assert.equal(manifest.dependencies["gobridge-runtime"], __RUNTIME_VERSION__);
+assert.equal(manifest.dependencies, undefined);
 
 try {
   assert.equal(await greet({name: "World"}), "Hello, World!");
@@ -78,7 +72,7 @@ try {
   await shutdown();
 }
 console.log("Clean npm install: bundled binary, functions, classes, scopes and bigint passed");
-'''.replace("__RUNTIME_VERSION__", json.dumps(version)))
+''')
         # There is no source checkout in this project's import path, and neither
         # package uses install scripts to download or build its executable.
         env = {key: value for key, value in os.environ.items() if key not in {"NODE_PATH", "NODE_OPTIONS", "GOBRIDGE_BINARY"}}

@@ -18,6 +18,8 @@ type project struct {
 	Version            string `json:"version"`
 	PythonDistribution string `json:"python_distribution"`
 	NPMPackage         string `json:"npm_package"`
+	Repository         string `json:"repository"`
+	License            string `json:"license"`
 }
 
 func loadProject() (project, error) {
