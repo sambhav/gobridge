@@ -40,7 +40,7 @@ hello help greet
 ```
 
 Top-level help lists available operations, descriptions, and the built-in
-`serve`, `schema`, and `generate-python` commands. It points to per-operation
+`serve`, `schema`, `generate-python`, and `generate-typescript` commands. It points to per-operation
 help instead of requiring users to inspect a JSON schema for ordinary flags.
 
 All three operation-help forms show the same information:
@@ -116,13 +116,14 @@ The final command still only displays help; it does not execute the constructor.
 Configuration is validated when an operation is called. If `--config` is
 omitted, the constructor receives `{}`; required configuration fields must still
 be provided. Supplying `--config` to a registry with no constructor is an error.
-`serve`, `schema`, `generate-python`, and top-level help do not accept it.
+`serve`, `schema`, both generation commands, and top-level help do not accept it.
 
 ## Strict metadata commands
 
 ```sh
 hello schema
 hello generate-python --class Hello --binary hello > hello.py
+hello generate-typescript --class Hello --binary hello > hello.ts
 hello serve --max-concurrency 64
 ```
 

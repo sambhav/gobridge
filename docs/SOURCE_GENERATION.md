@@ -103,7 +103,9 @@ go install ./cmd/gobridge
 Run `go generate ./...` inside your project with the installed `gobridge` on
 `PATH`. Pin the module version when adopting the library. The generator and runtime
 should come from the same version. The generated adapter is ordinary Go source;
-your existing build produces the daemon and its `generate-python` command.
+your existing build produces the daemon and its `generate-python` and
+`generate-typescript` commands. Both language APIs use the same annotated
+functions, methods, constructor options and field metadata.
 
 ## Python should see the library, not the adapter
 

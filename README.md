@@ -1,10 +1,9 @@
 # gobridge
 
-Keep your library in Go. Generate a CLI and typed Python functions and classes,
-with the Go binary bundled inside a platform wheel. TypeScript comes next after
-the Go, CLI, Python, and CLI-embedding workflow is fully tested.
+Keep your library in Go. Generate a CLI and typed Python and TypeScript functions
+and classes, with the Go binary bundled inside a Python wheel or npm package.
 
-**Development preview:** no Go version tags or Python packages have been
+**Development preview:** no Go version tags, Python packages, or npm packages have been
 published. Build and use the examples from this checkout.
 
 ## Ordinary Go functions become ordinary Python functions
@@ -42,6 +41,21 @@ with Greeter(prefix="Hey, ") as greeter:
 separate daemon and Go object. Methods have real signatures; model results are
 lightweight dataclasses. The runtimes have no mandatory Pydantic dependency.
 Async code can use `await aio.greet(...)` or an explicit `AsyncGreeter` instance.
+
+TypeScript uses the same Go library through a native Node API:
+
+```ts
+import { greet, Greeter } from "gobridge-greeter-example";
+
+console.log(await greet({ name: "World" }));
+await using greeter = new Greeter({ prefix: "Hey, " });
+console.log(await greeter.welcome({ name: "Sam" }));
+console.log((await greeter.stats()).calls); // 1n: Go int64 maps to bigint
+```
+
+Node 24+ clients return promises, use camelCase fields, support `AbortSignal`,
+and provide isolated async scopes. Build the local packages using the
+[TypeScript guide](docs/TYPESCRIPT.md#build-and-install-local-packages).
 
 ## Run it from a checkout
 
@@ -108,6 +122,7 @@ startup; IPC is intended for useful library operations. See the
 | Import the library directly from Go | [Native Go usage](docs/GO_CONSUMER.md) |
 | Expose your existing functions and methods | [Source annotations](docs/SOURCE_GENERATION.md), [Go registration API](docs/GO_API.md) |
 | Use generated Python functions and classes | [Hello World](docs/HELLO_WORLD.md), [Python ownership and controls](docs/API_DESIGN.md) |
+| Use generated TypeScript functions and classes | [Node API and npm packaging](docs/TYPESCRIPT.md) |
 | Explore CLI flags and JSON configuration | [CLI guide](docs/CLI.md) |
 | Add the bridge to an existing CLI or Cobra app | [Embedding guide](docs/EMBEDDING.md) |
 | Declare shared docs and validation | [Field metadata](docs/FIELD_METADATA.md) |

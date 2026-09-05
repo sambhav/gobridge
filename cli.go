@@ -143,10 +143,11 @@ func (r *Registry) cliHelp(out io.Writer) {
 	}
 	_ = w.Flush()
 	fmt.Fprintln(out, "\nCommands:")
-	fmt.Fprintln(out, "  serve            Run the private stdio daemon.")
-	fmt.Fprintln(out, "  schema           Print the complete JSON schema.")
-	fmt.Fprintln(out, "  generate-python  Generate typed Python functions and clients.")
-	fmt.Fprintln(out, "  generate-typescript  Generate typed TypeScript functions and clients.")
+	fmt.Fprintln(w, "  serve\tRun the private stdio daemon.")
+	fmt.Fprintln(w, "  schema\tPrint the complete JSON schema.")
+	fmt.Fprintln(w, "  generate-python\tGenerate typed Python functions and clients.")
+	fmt.Fprintln(w, "  generate-typescript\tGenerate typed TypeScript functions and clients.")
+	_ = w.Flush()
 	fmt.Fprintf(out, "\nHelp: %s <operation> --help or %s help <operation>\n", program, program)
 	r.cliConfigHelp(out)
 }

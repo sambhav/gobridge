@@ -356,13 +356,14 @@ python tools/check.py
 python tools/test_wheel.py --example hello
 ```
 
-The first command builds both examples, rejects stale generated bindings, runs
+The first command builds the examples, rejects stale generated bindings, runs
 Go race tests and vet, and executes pytest integration tests including this
 tutorial's CLI, typed sync/async calls, default sharing, scoped restoration,
 and concurrent demo. The second installs
 the built Hello wheel into a fresh virtual environment and checks that its
 bundled executable works through both Python clients.
 
-Next additions are tracked in [the API design](API_DESIGN.md) and
-[the implementation plan](PLAN.md): direct Go function binding, Go constructor
-options mapped to Python initialization, richer methods, and TypeScript.
+Continue with [source annotations](SOURCE_GENERATION.md) to expose ordinary Go
+functions, constructors and methods, or use the same library through the
+[TypeScript API](TYPESCRIPT.md). [The implementation plan](PLAN.md) tracks
+release hardening and future resource models.

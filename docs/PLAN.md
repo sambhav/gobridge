@@ -24,30 +24,34 @@
 These checks denote implemented code, not a released compatibility guarantee.
 CI and the validation notes record which environments were actually tested.
 
-## Current gate: finish Go, CLI, Python and embedding
+## Completed gate: Go, CLI, Python and embedding
 
-- [ ] Finish and test embedding inside an existing CLI, including Cobra, with
+- [x] Finish and test embedding inside an existing CLI, including Cobra, with
   clear stream/argument ownership and no unexpected exits or constructor calls.
-- [ ] Keep the complete Linux/macOS/Windows matrix green for the final combined
+- [x] Keep the complete Linux/macOS/Windows matrix green for the final combined
   changes, including native Go use, source generation, Python multiprocessing,
   metadata, help, and clean bundled-wheel installs.
-- [ ] Verify the user-facing examples and documentation against that revision.
+- [x] Verify the user-facing examples and documentation against that revision.
 
 Each feature is documented first, then implemented and pushed as its own
-reviewable increment. TypeScript starts after this gate is complete.
+reviewable increment. All 15 jobs passed at `3411af4` before TypeScript began.
 
-## Next: TypeScript
+## Implemented: TypeScript
 
-Use the same versioned protocol and schema. Generate a client class with typed
-parameter objects, result interfaces and Promise-returning methods. Map
-AbortSignal to cancellation. Each Node process owns its daemon; explicitly
-share a client within an event loop. Worker threads start separate clients by
-default, with an opt-in broker only if needed. Browser runtimes cannot launch
-local processes and are outside this transport's scope.
+- [x] Dependency-free Node 24+ runtime using the same protocol and schema.
+- [x] Generated Promise-returning functions/classes and readonly camelCase models.
+- [x] Typed constructor options with separate transport controls.
+- [x] Full Go int64 range as bigint, with exact JSON numeric literals.
+- [x] Lazy module defaults, async scopes, cancellation and async disposal.
+- [x] Bounded pending requests/output queues, sticky failures and daemon cleanup.
+- [x] Real Go integration, strict type checks and worker isolation tests.
+- [x] Six-target npm bundle and clean offline package-install checks.
+- [x] Node 24/26 CI on Linux, macOS and Windows alongside the Go/Python jobs.
 
-Resolve integer semantics before shipping: Go signed 64-bit values can exceed
-JavaScript's safe Number range. Define tagged decimal-string bigint fields or
-restrict the schema; never silently round. Python preserves JSON integer values.
+The [TypeScript guide](TYPESCRIPT.md) records the public API and packaging recipe.
+Browser runtimes cannot launch local processes and remain outside this transport.
+All 25 combined jobs passed at `ba2642b`, including both Node versions on all
+three operating systems and clean npm/wheel installations.
 
 ## Release hardening
 
@@ -83,3 +87,5 @@ without finding a binary, use threads and asyncio, and pass client configuration
 into multiprocessing. Errors and cancellation behave predictably, and shutdown
 reaps daemons. The same Go operations work through the standalone or embedded
 CLI. Documented OS tests and packaging gates must pass before tagging a release.
+Node users can install a bundled npm package and use the corresponding typed
+functions, configured classes, AbortSignal cancellation and isolated async scopes.

@@ -18,6 +18,7 @@ For repository development:
 ```sh
 npm ci --ignore-scripts
 npm test
+npm run test:integration
 ```
 
 From the repository root, `python tools/build_npm.py` creates local runtime and

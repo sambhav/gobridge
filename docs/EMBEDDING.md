@@ -93,6 +93,20 @@ protects against loading bindings for a different registry. Generate those
 bindings from the same registry during your build; the shipped host only needs
 the daemon entrypoint.
 
+The generated TypeScript client accepts the same command prefix:
+
+```ts
+import { Greeter } from "gobridge-greeter-example";
+
+await using greeter = new Greeter({
+  prefix: "Hey, ",
+  _runtime: { command: ["./host", "bridge"] },
+});
+console.log(await greeter.welcome({ name: "Sam" }));
+```
+
+Python and TypeScript integration tests both exercise the runnable Cobra host.
+
 For importable module functions, configure the default client before its first
 call:
 

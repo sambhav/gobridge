@@ -1,8 +1,8 @@
 # TypeScript: the same Go library, with a native Node API
 
-Design checkpoint: this document is pushed before implementation. The complete
-Go/CLI/Python/Cobra integration has passed its cross-platform CI gate. TypeScript
-is the next increment, built on the same schema and private stdio protocol.
+Implemented development preview. This design was pushed before implementation,
+after the complete Go/CLI/Python/Cobra integration passed its cross-platform CI
+gate. TypeScript uses the same schema and private stdio protocol.
 
 ## Import a function, or create an instance
 
@@ -44,11 +44,13 @@ const greeter = new Greeter({
 
 The runtime appends `serve` to the executable/argument prefix, so this example
 launches `host bridge serve`, including the Cobra embedding case. No shell is
-involved. Published example packages include the native binary as package data;
+involved. Built example packages include the native binary as package data;
 normal consumers need no executable configuration.
 
 Go constructor fields become typed properties on the generated options object.
 Required Go fields remain required; pointer fields are optional and nullable.
+If Go omits a nil pointer using `omitempty`, that optional property is absent in
+the result. Nil slices and maps remain `null`.
 The same Go field documentation and constraints appear in generated JSDoc and
 the exported schema. Go remains the authoritative constraint validator.
 
@@ -137,7 +139,7 @@ Browser runtimes cannot spawn the local Go binary and are outside this transport
 CommonJS, browser RPC transports, shared machine daemons, and streaming are
 separate extensions rather than hidden changes to the first version.
 
-Planned author commands:
+Author commands:
 
 ```sh
 go build -o bin/annotated ./examples/annotated/cmd/annotated
@@ -147,6 +149,50 @@ bin/annotated generate-typescript --class Greeter --binary annotated \
 
 Generation emits real declarations and signatures, not a dynamic property proxy.
 Generated code and package installation are checked in CI alongside Go/Python.
+
+## Build and install local packages
+
+From the repository root with Go, Python and Node 24+ installed:
+
+```sh
+npm ci --ignore-scripts --prefix typescript
+python tools/check_typescript.py
+python tools/build_npm.py
+python tools/test_npm.py
+```
+
+The check compiles generated bindings and deliberately invalid type examples,
+then runs the runtime and real Go integration tests. The package builder emits
+`dist/npm/gobridge-runtime-0.1.0.tgz` and
+`dist/npm/gobridge-greeter-example-0.1.0.tgz`. The second package contains the
+generated JavaScript, declarations and six Go executables. Consumers need Node;
+they do not need Go, Python, a compiler, or install scripts.
+
+Install both tarballs in another project, substituting your checkout's path:
+
+```sh
+npm install --offline --ignore-scripts \
+  /path/to/gobridge/dist/npm/gobridge-runtime-0.1.0.tgz \
+  /path/to/gobridge/dist/npm/gobridge-greeter-example-0.1.0.tgz
+node --input-type=module -e 'import {greet} from "gobridge-greeter-example"; console.log(await greet({name:"World"}))'
+```
+
+These commands build and install local artifacts; they do not publish to npm.
+For your own Go command, select its package, exported class and executable name:
+
+```sh
+python tools/build_npm.py --go-package ./examples/textkit \
+  --package gobridge-textkit-example --class TextKit --binary textkit
+```
+
+`--targets linux-amd64` can shorten a local build. The default includes Linux,
+macOS and Windows on amd64/arm64 with `CGO_ENABLED=0`. Libraries that need cgo
+require a different cross-compilation recipe. The reference install checker
+exercises the default Greeter package; add application checks for another API.
+
+For runtime-only development, `npm test --prefix typescript` runs the codec and
+transport tests without Go. The portable full check above also verifies the
+checked-in examples and Cobra command prefix.
 
 ## Acceptance checks
 
