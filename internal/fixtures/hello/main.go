@@ -1,4 +1,4 @@
-// Hello is a small, complete Go library exposed as a CLI and Python package.
+// Hello exercises typed registration and cache ownership in integration tests.
 package main
 
 import (
@@ -21,7 +21,7 @@ type Greeting struct {
 	Message string `json:"message"`
 }
 
-// The extra fields make daemon ownership and cache reuse visible in the demo.
+// The extra fields make daemon ownership and cache reuse observable in tests.
 type CachedGreeting struct {
 	Message     string `json:"message"`
 	Computation int64  `json:"computation"`

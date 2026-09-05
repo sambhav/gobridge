@@ -19,7 +19,7 @@ def main():
     example = args.directory.resolve() / f"gobridge-greeter-example-{version}.tgz"
     for package in (example,):
         if not package.is_file():
-            parser.error(f"missing {package}; run tools/build_npm.py first")
+            parser.error(f"missing {package}; run gobridge build --typescript first")
     with tempfile.TemporaryDirectory(prefix="gobridge-node-install-") as temp:
         project = Path(temp)
         (project / "package.json").write_text(json.dumps({"name": "gobridge-install-check", "private": True, "type": "module"}) + "\n")

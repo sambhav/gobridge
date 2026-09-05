@@ -1,7 +1,7 @@
 """Build self-contained binary wheels without requiring target hosts.
 
 Pass --go-package, --package, --class, --binary and --distribution to wrap your
-own Go library. Defaults build the textkit example. No package is uploaded.
+own Go library. Defaults build the greeter example. No package is uploaded.
 """
 import argparse
 import keyword
@@ -86,11 +86,11 @@ def main():
     global PROJECT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--targets", nargs="+", choices=TARGETS, default=list(TARGETS))
-    parser.add_argument("--go-package", default="./examples/textkit", help="Go command package to build")
-    parser.add_argument("--package", default="textkit", help="Top-level Python import package")
-    parser.add_argument("--class", dest="client_class", default="TextKit", help="Generated Python client class")
-    parser.add_argument("--binary", default="textkit", help="Executable filename without .exe")
-    parser.add_argument("--distribution", default="gobridge-textkit-example", help="Python wheel distribution name")
+    parser.add_argument("--go-package", default="./examples/greeter/cmd/greeter", help="Go command package to build")
+    parser.add_argument("--package", default="greeter", help="Top-level Python import package")
+    parser.add_argument("--class", dest="client_class", default="Greeter", help="Generated Python client class")
+    parser.add_argument("--binary", default="greeter", help="Executable filename without .exe")
+    parser.add_argument("--distribution", default="gobridge-greeter-example", help="Python wheel distribution name")
     parser.add_argument("--project", type=Path, default=ROOT, help="Go project directory")
     parser.add_argument("--output", type=Path, default=ROOT / "dist", help="Wheel output directory")
     parser.add_argument("--version", help="Application package version (default: runtime version)")
