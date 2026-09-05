@@ -1,4 +1,4 @@
-"""Keep the introductory tutorial runnable against the actual Go binary."""
+"""Typed registration, cached state, and client ownership regressions."""
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import dataclasses
@@ -6,12 +6,10 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "examples/hello"))
 from hello import (Hello as AsyncHello, SyncHello as Hello, Greeting, cached_greet as cached_greet_async, cached_greet_sync as cached_greet, greet_sync as greet, configure, session, session_sync, shutdown_sync)
 
 BINARY = ROOT / "bin" / ("hello.exe" if os.name == "nt" else "hello")
@@ -115,17 +113,3 @@ async def test_async_scopes_are_isolated_between_tasks_and_restore_default(modul
 async def test_hello_async_result_is_typed():
     async with AsyncHello(str(BINARY)) as hello:
         assert await hello.greet(name="async") == Greeting(message="Hello, async!")
-
-
-def test_hello_demo_covers_cache_threads_async_and_isolation():
-    output = subprocess.check_output(
-        [sys.executable, str(ROOT / "examples/hello/demo.py"), "--binary", str(BINARY)],
-        cwd=ROOT, text=True, timeout=30,
-        env=dict(os.environ, PYTHONPATH=str(ROOT / "python/src")),
-    )
-    assert "Hello, world!" in output
-    assert "Sync and async functions share one default Go cache." in output
-    assert "A scope restores the previous default after isolating state." in output
-    assert "Threads share one Go cache." in output
-    assert "Separate clients have separate Go state." in output
-    assert "Async tasks share one Go cache." in output

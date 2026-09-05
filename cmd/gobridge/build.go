@@ -75,7 +75,14 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	for _, path := range []string{"LICENSE", "python/pyproject.toml", "python/README.md", "python/LICENSE", "python/src", "typescript/src", "typescript/package.json", "typescript/package-lock.json", "typescript/tsconfig.json", "typescript/LICENSE", "typescript/README.md", "tools/build_wheels.py", "tools/build_npm.py", "tools/packaging_common.py"} {
+	assets := []string{"LICENSE"}
+	if *python {
+		assets = append(assets, "python/pyproject.toml", "python/src", "tools/build_wheels.py", "tools/packaging_common.py")
+	}
+	if *typescript {
+		assets = append(assets, "typescript/src", "typescript/package.json", "typescript/package-lock.json", "tools/build_npm.py")
+	}
+	for _, path := range assets {
 		if err := copyBuildAsset(source, stage, path); err != nil {
 			return err
 		}

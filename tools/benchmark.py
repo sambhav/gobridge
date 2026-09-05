@@ -10,8 +10,8 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT / "python/src"), str(ROOT / "examples/textkit")]
-from textkit import TextKit as AsyncTextKit, SyncTextKit as TextKit
+sys.path[:0] = [str(ROOT / "python/src"), str(ROOT / ".generated/python")]
+from generate_fixtures import generate_python
 
 
 def latency(values):
@@ -26,6 +26,9 @@ def main():
     args = parser.parse_args()
     if args.calls < 20:
         parser.error("use at least 20 calls")
+    generate_python(["textkit"])
+    from textkit import TextKit as AsyncTextKit, SyncTextKit as TextKit
+
     binary = ROOT / "bin" / ("textkit.exe" if os.name == "nt" else "textkit")
     report = {"python": platform.python_version(), "platform": platform.platform(), "calls": args.calls}
     start = time.perf_counter_ns()

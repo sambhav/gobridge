@@ -5,15 +5,10 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from generate_fixtures import FIXTURES
+
 ROOT = Path(__file__).resolve().parents[1]
 TYPESCRIPT = ROOT / "typescript"
-EXAMPLES = {
-    "textkit": ("./examples/textkit", "TextKit"),
-    "hello": ("./examples/hello", "Hello"),
-    "greeter": ("./examples/greeter/cmd/greeter", "Greeter"),
-    "wiretypes": ("./internal/fixtures/wiretypes", "WireTypes"),
-    "metadata": ("./internal/fixtures/metadata", "Store"),
-}
 
 
 def run(*args, cwd=ROOT):
@@ -34,15 +29,12 @@ def main():
     shutil.copytree(TYPESCRIPT / "dist", runtime / "dist", dirs_exist_ok=True)
     (ROOT / "bin").mkdir(exist_ok=True)
     suffix = ".exe" if os.name == "nt" else ""
-    for name, (package, client_class) in EXAMPLES.items():
+    for name, (package, client_class) in FIXTURES.items():
         binary = ROOT / "bin" / (name + suffix)
         run("go", "build", "-o", str(binary), package)
         source = subprocess.check_output([
             str(binary), "generate-typescript", "--class", client_class, "--binary", name,
         ]).decode("utf-8")
-        checked_in = ROOT / "examples" / name / (name + ".ts")
-        if checked_in.is_file() and checked_in.read_text(encoding="utf-8") != source:
-            raise SystemExit(f"Generated TypeScript is stale: {checked_in}")
         (generated / (name + ".ts")).write_text(source, encoding="utf-8", newline="\n")
     run("go", "build", "-o", str(ROOT / "bin" / ("cobra-host" + suffix)), ".", cwd=ROOT / "examples" / "cobra")
     shutil.copyfile(TYPESCRIPT / "test" / "api.types.ts", generated / "api.types.ts")

@@ -1,8 +1,7 @@
 # Development and internals
 
-The [README](README.md) is the single user guide. Keep examples progressive and
-put implementation notes here. Document APIs before implementing them, regenerate
-examples, and keep draft PR increments reviewable.
+The [README](README.md) covers installation and the quick start; the
+[API guide](docs/usage.md) covers advanced usage. Keep implementation notes here.
 
 ## Verify a change
 
@@ -13,10 +12,14 @@ npm ci --ignore-scripts --prefix typescript
 python tools/check_typescript.py
 ```
 
-The first check runs Go race tests/vet, adapter/Python drift checks, Cobra tests
-and pytest with real daemons. The second compiles Node runtime/generated types,
+The first check runs Go race tests/vet, adapter drift checks, Cobra tests
+and pytest with real daemons. Pytest builds the Go fixtures and generates current
+Python bindings before test collection, so `python -m pytest` also works directly. Generated bindings live in
+ignored output directories. `examples/greeter` is the public library example;
+`internal/fixtures` holds programs for protocol, type, and lifecycle tests.
+The second compiles Node runtime/generated types,
 checks invalid type examples, and tests real Go binaries and malformed peers.
-After building packages, `python tools/test_wheel.py --example greeter` and
+After building packages, `python tools/test_wheel.py` and
 `python tools/test_npm.py` verify clean installs.
 `python tools/test_project_build.py` checks the standalone author CLI from a
 separate Go project, including an independent application package version.
@@ -65,38 +68,13 @@ and unblocking borrowed readers.
 ## Performance
 
 ```sh
-go build -o bin/textkit ./examples/textkit
 python tools/benchmark.py --calls 1000
 go test -run '^$' -bench . -benchmem
 ```
 
-One 2026-09-05 Linux x86_64 sample (Python 3.12.13, Go 1.27.1, 1,000 calls after
-warmup) recorded typed sync/async medians of 159/314 microseconds, cold startup
-19.57 ms, and async throughput 5,020 calls/s at concurrency 16. Separate Go
-microbenchmarks measured Bind at 7.623 microseconds/op and Memo hits at 107.4 ns/op
-with zero allocations. These are shared-host observations, not guarantees or
-controlled comparisons. CI uploads benchmarks; timing is not a pass/fail gate.
-Measure realistic payloads and saturation before adding specialized codecs or
-optional dependencies. Reuse processes and batch useful work first.
-
-## Before release
-
-- Expand native arm64 host and minimum OS coverage.
-- Add sustained load, protocol fuzzing, process-kill and free-threaded Python checks.
-- Extend reproducibility and signing checks beyond the release artifact manifest.
-- Define schema compatibility policy; exact fingerprints require regeneration.
-- Keep native Go, Python/Node APIs, Cobra and clean artifact installation green.
-
-Streaming, remote object handles, shared machine daemons and disk-backed caches
-are future resource models needing explicit lifetime, backpressure and recovery.
-The present API copies values and owns one object per private daemon.
-
-Primary references: [Python multiprocessing](https://docs.python.org/3/library/multiprocessing.html),
-[fork hooks](https://docs.python.org/3/library/os.html#os.register_at_fork),
-[Node child processes](https://nodejs.org/api/child_process.html),
-[AsyncLocalStorage](https://nodejs.org/api/async_context.html),
-[exact JSON numbers](https://tc39.es/proposal-json-parse-with-source/),
-[Go cross-compilation](https://go.dev/doc/install/source#environment).
+CI uploads benchmark results; timings are not a pass/fail gate. Measure realistic
+payloads and saturation on your target host. Reuse processes and batch useful work
+to amortize IPC.
 
 ## Releases from GitHub
 
