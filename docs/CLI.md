@@ -1,9 +1,9 @@
 # A discoverable CLI for the same Go operations
 
-**Design-first increment.** Operation calls, JSON input/output, schema
-inspection, Python generation and constructor configuration already work.
-The help and strict metadata-argument behavior described below is the next
-small implementation slice. Its Go tests will accompany that change.
+**Implemented increment.** This document was committed before the CLI help
+change. Operation help, top-level aliases, constructor discovery and strict
+metadata-argument handling are now covered by Go tests alongside the existing
+operation calls, JSON input/output, schema inspection and Python generation.
 
 ## Call operations directly or pipe JSON
 

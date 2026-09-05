@@ -7,8 +7,105 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"text/tabwriter"
 )
+
+func cliHelpFlag(s string) bool { return s == "--help" || s == "-h" }
+
+func cliType(t Type) string {
+	switch t.Kind {
+	case "void":
+		return "null"
+	case "ptr":
+		elem := cliType(*t.Elem)
+		if strings.HasSuffix(elem, " or null") {
+			return elem
+		}
+		return elem + " or null"
+	case "slice":
+		return "array[" + cliType(*t.Elem) + "] or null"
+	case "map":
+		return "map[string, " + cliType(*t.Elem) + "] or null"
+	case "struct":
+		return t.Name
+	case "string":
+		return "string"
+	case "bool":
+		return "boolean"
+	case "float32", "float64":
+		return "number"
+	default:
+		return "integer"
+	}
+}
+
+// cliFields formats schema fields without reflecting on or constructing values.
+// Configuration uses JSON keys; operation arguments use kebab-case flags.
+func cliFields(out io.Writer, fields []Field, flags bool) {
+	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	for _, field := range fields {
+		name, required := field.Name, "required"
+		if flags {
+			name = "--" + strings.ReplaceAll(name, "_", "-")
+		}
+		if field.Type.Kind == "ptr" {
+			required = "optional"
+		}
+		fmt.Fprintf(w, "  %s\t%s\t%s\n", name, cliType(field.Type), required)
+	}
+	_ = w.Flush()
+}
+
+func (r *Registry) cliConfigHelp(out io.Writer) {
+	if r.constructor == nil {
+		return
+	}
+	fmt.Fprintln(out, "\nConstructor: --config OBJECT before the operation (omitted: {}).")
+	fmt.Fprintln(out, "JSON configuration fields:")
+	cliFields(out, describe(r.constructor.config).Fields, false)
+}
+
+func (r *Registry) cliHelp(out io.Writer) {
+	program := filepath.Base(os.Args[0])
+	fmt.Fprintf(out, "Usage: %s <operation> [--field value ... | --json OBJECT | --json -]\n", program)
+	fmt.Fprintln(out, "\nOperations:")
+	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	for _, name := range r.names() {
+		fmt.Fprintf(w, "  %s\t%s\n", name, r.ops[name].description)
+	}
+	_ = w.Flush()
+	fmt.Fprintln(out, "\nCommands:")
+	fmt.Fprintln(out, "  serve            Run the private stdio daemon.")
+	fmt.Fprintln(out, "  schema           Print the complete JSON schema.")
+	fmt.Fprintln(out, "  generate-python  Generate typed Python functions and clients.")
+	fmt.Fprintf(out, "\nHelp: %s <operation> --help or %s help <operation>\n", program, program)
+	r.cliConfigHelp(out)
+}
+
+func (r *Registry) cliOperationHelp(name string, out io.Writer) error {
+	op, ok := r.ops[name]
+	if !ok {
+		return Failure("not_found", "unknown operation: "+name)
+	}
+	fmt.Fprintln(out, name)
+	if op.description != "" {
+		fmt.Fprintln(out, op.description)
+	}
+	config := ""
+	if r.constructor != nil {
+		config = "[--config OBJECT] "
+	}
+	fmt.Fprintf(out, "\nUsage: %s %s%s [--field value ... | --json OBJECT | --json -]\n", filepath.Base(os.Args[0]), config, name)
+	fmt.Fprintln(out, "\nFlags:")
+	cliFields(out, op.inputSchema().Fields, true)
+	fmt.Fprintln(out, "  --json OBJECT  Read the whole input as JSON; use - for stdin.")
+	fmt.Fprintln(out, "  -h, --help     Show this help without running the operation.")
+	fmt.Fprintf(out, "\nResult: %s\n", cliType(describe(op.out)))
+	r.cliConfigHelp(out)
+	return nil
+}
 
 // Run exposes the same registry as a CLI, schema command, generator, or daemon.
 // Operation flags use JSON literals, except strings which are passed as text.
@@ -20,18 +117,22 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 		}
 		config = json.RawMessage(args[1])
 		args = args[2:]
-		if args[0] == "serve" || args[0] == "schema" || args[0] == "generate-python" || args[0] == "help" || args[0] == "--help" {
+		if args[0] == "serve" || args[0] == "schema" || args[0] == "generate-python" || args[0] == "help" || cliHelpFlag(args[0]) {
 			return fmt.Errorf("--config is supported for direct operation commands only")
 		}
 	}
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
-		fmt.Fprintln(out, "Commands: serve, schema, generate-python, <operation> [--json OBJECT | --field value ...]")
-		if r.constructor != nil {
-			fmt.Fprintln(out, "Constructor: --config OBJECT <operation> ... (omitted config defaults to {})")
+	if len(args) == 0 {
+		r.cliHelp(out)
+		return nil
+	}
+	if cliHelpFlag(args[0]) || args[0] == "help" {
+		if args[0] == "help" && len(args) == 2 {
+			return r.cliOperationHelp(args[1], out)
 		}
-		for _, n := range r.names() {
-			fmt.Fprintf(out, "  %-20s %s\n", n, r.ops[n].description)
+		if len(args) != 1 {
+			return fmt.Errorf("unexpected arguments after %s", args[0])
 		}
+		r.cliHelp(out)
 		return nil
 	}
 	switch args[0] {
@@ -47,6 +148,9 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 		}
 		return r.Serve(ctx, in, out, *n)
 	case "schema":
+		if len(args) != 1 {
+			return fmt.Errorf("schema does not accept arguments")
+		}
 		return json.NewEncoder(out).Encode(r.Schema())
 	case "generate-python":
 		flags := flag.NewFlagSet("generate-python", flag.ContinueOnError)
@@ -64,6 +168,15 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 	op, ok := r.ops[args[0]]
 	if !ok {
 		return Failure("not_found", "unknown operation: "+args[0])
+	}
+	if config != nil && r.constructor == nil {
+		return fmt.Errorf("--config requires a registered constructor")
+	}
+	if len(args) > 1 && cliHelpFlag(args[1]) {
+		if len(args) != 2 {
+			return fmt.Errorf("unexpected arguments after %s", args[1])
+		}
+		return r.cliOperationHelp(args[0], out)
 	}
 	var raw []byte
 	if len(args) > 1 && args[1] == "--json" {
@@ -121,8 +234,6 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 		if err := r.Initialize(ctx, config); err != nil {
 			return err
 		}
-	} else if config != nil {
-		return fmt.Errorf("--config requires a registered constructor")
 	}
 	v, err := r.Call(ctx, args[0], raw)
 	if err != nil {
