@@ -23,6 +23,10 @@ export function parseWire(text: string): unknown {
 export function stringifyWire(value: unknown): string {
   const result = JSON.stringify(value, (_key, item: unknown) => {
     if (typeof item === "bigint") {
+      // Safe integer Numbers have the identical decimal wire representation.
+      // Avoid allocating a rawJSON wrapper for the common small-int64 case.
+      const number = Number(item);
+      if (Number.isSafeInteger(number)) return number;
       return (JSON as typeof JSON & { rawJSON(text: string): unknown }).rawJSON(item.toString());
     }
     if (typeof item === "number" && !Number.isFinite(item)) {
