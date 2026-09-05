@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "e20c44d08900e65918d05a1b88876c909638e693",
+  "include-component-in-tag": false,
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": false,
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "extra-files": [
+        {"type": "toml", "path": "python/pyproject.toml", "jsonpath": "$.project.version"},
+        "typescript/package.json",
+        {"type": "json", "path": "typescript/package-lock.json", "jsonpath": "$.version"},
+        {"type": "json", "path": "typescript/package-lock.json", "jsonpath": "$.packages[''].version"},
+        "gobridge.json"
+      ]
+    }
+  }
+}
