@@ -1,11 +1,13 @@
 """Build the runtime and example binary wheels without requiring target hosts.
 
-This is a reference packaging recipe. Adapt PACKAGE, CLASS and GO_PACKAGE to
-wrap your own Go library. No package is uploaded by this script.
+Pass --go-package, --package, --class, --binary and --distribution to wrap your
+own Go library. Defaults build the textkit example. No package is uploaded.
 """
 import argparse
+import keyword
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -28,26 +30,40 @@ def run(*args, **kwargs):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--targets", nargs="+", choices=TARGETS, default=list(TARGETS))
+    parser.add_argument("--go-package", default="./examples/textkit", help="Go command package to build")
+    parser.add_argument("--package", default="textkit", help="Top-level Python import package")
+    parser.add_argument("--class", dest="client_class", default="TextKit", help="Generated Python client class")
+    parser.add_argument("--binary", default="textkit", help="Executable filename without .exe")
+    parser.add_argument("--distribution", default="gobridge-textkit-example", help="Python wheel distribution name")
     args = parser.parse_args()
+    if not args.package.isidentifier() or keyword.iskeyword(args.package):
+        parser.error("--package must be one Python package identifier")
+    if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", args.client_class):
+        parser.error("--class must be a capitalized Python class identifier")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", args.binary):
+        parser.error("--binary must be a filename stem using letters, digits, _ or -")
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?", args.distribution):
+        parser.error("--distribution must be a Python distribution name")
     output = ROOT / "dist"
     output.mkdir(exist_ok=True)
     run(sys.executable, "-m", "pip", "wheel", "--disable-pip-version-check", "--no-index", "--no-deps", "--no-build-isolation", "-w", str(output), str(ROOT / "python"))
     with tempfile.TemporaryDirectory(prefix="gobridge-wheels-") as tmp:
         temp = Path(tmp)
-        host = temp / ("textkit.exe" if os.name == "nt" else "textkit")
-        run("go", "build", "-o", str(host), "./examples/textkit")
-        bindings = subprocess.check_output([str(host), "generate-python", "--class", "TextKit", "--binary", "textkit"])
+        host = temp / (args.binary + (".exe" if os.name == "nt" else ""))
+        host_env = {key: value for key, value in os.environ.items() if key not in {"GOOS", "GOARCH"}}
+        run("go", "build", "-o", str(host), args.go_package, env=host_env)
+        bindings = subprocess.check_output([str(host), "generate-python", "--class", args.client_class, "--binary", args.binary])
         for target in args.targets:
             goos, goarch, tag = TARGETS[target]
             stage = temp / target
-            package = stage / "textkit"
+            package = stage / args.package
             binary_dir = package / "_bin"
             binary_dir.mkdir(parents=True)
             (package / "__init__.py").write_bytes(bindings)
             (package / "py.typed").write_text("")
-            binary = binary_dir / ("textkit.exe" if goos == "windows" else "textkit")
+            binary = binary_dir / (args.binary + (".exe" if goos == "windows" else ""))
             env = dict(os.environ, GOOS=goos, GOARCH=goarch, CGO_ENABLED="0")
-            run("go", "build", "-trimpath", "-o", str(binary), "./examples/textkit", env=env)
+            run("go", "build", "-trimpath", "-o", str(binary), args.go_package, env=env)
             binary.chmod(0o755)
             # Standard setuptools/wheel machinery writes metadata, hashes and
             # executable attributes. Python is ABI-independent; the Go binary
@@ -62,8 +78,8 @@ class PlatformWheel(bdist_wheel):
         self.root_is_pure = False
     def get_tag(self):
         return "py3", "none", {tag!r}
-setup(name="gobridge-textkit-example", version="0.1.0", packages=["textkit"],
-      package_data={{"textkit": ["py.typed", "_bin/*"]}},
+setup(name={args.distribution!r}, version="0.1.0", packages=[{args.package!r}],
+      package_data={{{args.package!r}: ["py.typed", "_bin/*"]}},
       license="Apache-2.0", license_files=["LICENSE"], python_requires=">=3.10", install_requires=["gobridge-runtime==0.1.0"],
       cmdclass={{"bdist_wheel": PlatformWheel}})
 ''')

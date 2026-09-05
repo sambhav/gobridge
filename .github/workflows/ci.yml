@@ -65,6 +65,7 @@ jobs:
           name: wheels
           path: dist
       - run: python tools/test_wheel.py
+      - run: python tools/test_wheel.py --example hello
   minimum-go:
     runs-on: ubuntu-latest
     steps:
@@ -88,6 +89,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install setuptools wheel
       - run: python tools/build_wheels.py
+      - run: python tools/build_wheels.py --go-package ./examples/hello --package hello --class Hello --binary hello --distribution gobridge-hello-example
       - uses: actions/upload-artifact@v4
         with:
           name: wheels

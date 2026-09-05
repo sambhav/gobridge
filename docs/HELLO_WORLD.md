@@ -5,10 +5,19 @@ Python classes, concurrency, and a wheel containing its Go binary. Run the
 commands from the repository root. Development requires Go 1.23+ and Python
 3.10+; users of the resulting wheel only need Python.
 
-The working example lives in [`examples/hello`](../examples/hello). The API
-design for module-level convenience functions and constructor options is in
-[`API_DESIGN.md`](API_DESIGN.md); the steps here describe the class-based
-example and will grow as those features land.
+The working example lives in [`examples/hello`](../examples/hello). After
+installing its platform wheel, the simplest Python API is an ordinary import:
+
+```python
+from hello import greet
+
+print(greet(name="world").message)  # Hello, world!
+```
+
+The first call starts the bundled Go binary; later calls reuse it. Importing
+the package starts no processes. You can also create explicit instances or use
+scoped overrides when you need separate state. See [the API design](API_DESIGN.md)
+for the ownership model and upcoming Go function/constructor helpers.
 
 ## 1. Start with an ordinary Go function
 
@@ -94,35 +103,82 @@ python examples/hello/demo.py
 ```
 
 The generated file is checked in so you can review its actual signatures.
-The generator creates a `Hello` class, an `AsyncHello` class, and immutable,
-typed dataclasses for request and result types. There is no Pydantic or other
-runtime dependency.
+The generator creates module functions, an async `aio` namespace, a `Hello`
+class, an `AsyncHello` class, and immutable, typed dataclasses for request and
+result types. There is no Pydantic or other runtime dependency.
 
 The demo imports `hello.py` beside itself. For your own development script,
 place the generated module beside that script, or add `examples/hello` to
 your Python import path:
 
 ```python
-from hello import Hello
+from hello import control, greet
 
-with Hello("./bin/hello") as hello:
-    result = hello.greet(name="world")
-    print(result.message)  # Hello, world!
+# Development only: installed wheels locate their bundled executable.
+control.configure(command="./bin/hello")
+print(greet(name="world").message)  # Hello, world!
+control.close()
 ```
 
-The method has a real `name: str` keyword argument and returns a `Greeting`.
+The function has a real `name: str` keyword argument and returns a `Greeting`.
 Editor completion works without dynamic attribute lookup. A misspelled keyword
 fails as an ordinary Python `TypeError`. Go validates the wire input before
 calling the handler. Python type annotations provide editor/static-checking
 support; they are not a second runtime validation framework.
 
-Creating a client is lazy. Its first call or context entry starts a private Go
-daemon over stdio. Leaving the context closes the connection and stops the
-daemon. Keep the client alive to retain its Go state and amortize startup.
+Module functions reuse one lazy default client per generated module per Python
+process. Sync and async module calls share that client's Go state. Normal
+interpreter exit attempts cleanup; `control.close()` gives you an explicit
+reset. After reset, a later module call creates a fresh default. A crashed daemon
+does not restart itself or replay operations.
+
+Use an explicit class to own a separate daemon:
+
+```python
+from hello import Hello
+
+with Hello("./bin/hello") as hello:
+    print(hello.greet(name="explicit").message)
+```
+
+Creating a client is lazy. Its first call or context entry starts the daemon.
+Leaving its context closes it permanently. Keep the client alive to retain its
+Go state and amortize startup. Installed wheels support `Hello()` without a
+path. Advanced transport options stay separate from library arguments:
+
+```python
+from gobridge import RuntimeOptions
+from hello import Hello
+
+with Hello(_runtime=RuntimeOptions(command="./bin/hello", timeout=5)) as hello:
+    result = hello.greet(name="configured", _timeout=1)
+```
 
 ## 4. Add async calls and threads
 
-Async methods have the same keyword arguments and return types:
+For async code, the `aio` namespace has the same keyword arguments and return
+types as the synchronous module functions:
+
+```python
+import asyncio
+from hello import aio, control, greet
+
+control.configure(command="./bin/hello")  # Development only.
+
+async def main():
+    print(greet(name="sync").message)
+    print((await aio.greet(name="async")).message)
+
+try:
+    asyncio.run(main())
+finally:
+    control.close()
+```
+
+These calls share one default daemon. Synchronous functions remain blocking;
+use `aio` for calls that must leave your event loop responsive.
+
+Explicit async instances work too:
 
 ```python
 import asyncio
@@ -154,6 +210,30 @@ Each client has one multiplexed connection; request IDs route results back to
 the right caller. Threads and async tasks using that client share its daemon.
 Two clients own two daemons. Go handlers may run concurrently, so shared state
 in your Go library must be concurrency-safe.
+
+### Isolate module functions temporarily
+
+Scopes give existing code that imports functions a temporary, separate client:
+
+```python
+from hello import cached_greet, control
+
+control.configure(command="./bin/hello")
+original = cached_greet(name="world")
+with control.scope(command="./bin/hello") as isolated:
+    scoped = cached_greet(name="world")
+    assert scoped.process_id != original.process_id
+    assert scoped == isolated.cached_greet(name="world")
+assert cached_greet(name="world") == original
+control.close()
+```
+
+Use `async with control.scope(...)` in async code. Nested scopes restore the
+previous client, including when the body raises. Scopes follow Python context
+variables: child async tasks inherit the current scope. New OS threads do not
+automatically inherit it; pass the explicit client to threads when scoped state
+must be shared. Each explicit scope owns and closes its own daemon. Default
+configuration is separate and cannot be replaced while the default is live.
 
 ## 5. Keep caching in Go
 
@@ -256,11 +336,12 @@ Install from the output directory on the matching target host:
 
 ```sh
 python -m pip install --no-index --find-links dist gobridge-hello-example
-python -c 'from hello import Hello; h=Hello(); print(h.greet(name="packaged").message); h.close()'
+python -c 'from hello import greet; print(greet(name="packaged").message)'
 ```
 
-No binary path or Go installation is required. `Hello()` resolves the executable
-relative to its installed package and launches it on first use. The separate
+No binary path or Go installation is required. The default client and `Hello()`
+resolve the executable relative to the installed package and launch it on first
+use. The separate
 `gobridge-runtime` wheel is included in `dist` and installed as a dependency.
 
 This is a local/private wheel recipe. Linux wheels use `linux_*` platform tags;
@@ -277,10 +358,11 @@ python tools/test_wheel.py --example hello
 
 The first command builds both examples, rejects stale generated bindings, runs
 Go race tests and vet, and executes pytest integration tests including this
-tutorial's CLI, typed sync/async calls, and concurrent demo. The second installs
+tutorial's CLI, typed sync/async calls, default sharing, scoped restoration,
+and concurrent demo. The second installs
 the built Hello wheel into a fresh virtual environment and checks that its
 bundled executable works through both Python clients.
 
 Next additions are tracked in [the API design](API_DESIGN.md) and
-[the implementation plan](PLAN.md): module-level functions, Go constructor
+[the implementation plan](PLAN.md): direct Go function binding, Go constructor
 options mapped to Python initialization, richer methods, and TypeScript.

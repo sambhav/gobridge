@@ -1,9 +1,11 @@
 # API evolution: simple functions, configured objects, explicit control
 
-**Design-first checkpoint.** This document is being pushed before the API
-changes below are implemented. The existing PR already supports explicit
-generated clients, typed Go adapters and binary wheels. Sections here describe
-the next increment; examples become runnable as accompanying tests land.
+**Implementation status.** This design was committed before implementation.
+The Python convenience increment adds generated module functions, `aio`, lazy
+process-local defaults, explicit clients, `RuntimeOptions`, and scoped controls.
+Their runnable example and integration tests live in [Hello World](HELLO_WORLD.md).
+Direct Go function binding and constructor/method APIs below describe the next
+increment until their own implementation and examples land.
 
 ## 1. Import a function and call it
 
@@ -88,7 +90,19 @@ For a library whose default requires constructor options,
 reject replacing a live default's configuration. Explicit instances remain the
 recommended way to manage different accounts, endpoints or option sets.
 
-## 4. Expose existing Go functions without boilerplate DTOs
+The runnable Hello example only needs an executable override during development:
+
+```python
+from hello import control, greet
+
+control.configure(command="./bin/hello")
+print(greet(name="Development").message)
+control.close()
+```
+
+Installed wheels resolve their package-data binary without that configuration.
+
+## 4. Expose existing Go functions without boilerplate DTOs (next increment)
 
 ```go
 func Greet(name string) string { return "Hello, " + name + "!" }
@@ -104,7 +118,7 @@ context.Context, typed parameters, and either a value, value+error, error only,
 or no result. Generated Python functions return the corresponding scalar/model
 or None. Unsupported signatures fail during registration.
 
-## 5. Constructors and methods preserve Go object ownership
+## 5. Constructors and methods preserve Go object ownership (next increment)
 
 ```go
 type Options struct {

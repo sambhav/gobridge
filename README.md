@@ -1,6 +1,6 @@
 # gobridge
 
-Write operations in Go. Expose them as a CLI and ordinary-looking Python
+Write operations in Go. Expose them as a CLI and typed Python functions and
 classes, backed by a private Go daemon. TypeScript bindings are planned.
 
 This is an initial implementation, not a released package. Neither the Go
@@ -13,7 +13,24 @@ calls, and package a cross-compiled binary inside a Python wheel.
 ## Python usage
 
 The example bindings are generated from Go types. Results are dataclasses,
-methods have real signatures, and errors are Python exceptions.
+functions and methods have real signatures, and errors are Python exceptions.
+
+```python
+from textkit import analyze, aio
+
+print(analyze(text="Hello from Go").words)  # 3
+
+async def example():
+    return (await aio.analyze(text="Hello asynchronously")).words
+```
+
+A packaged wheel includes the right Go binary. Importing starts no process;
+the first call lazily starts one default daemon for this module in the Python
+process. Sync and async module functions reuse it. For development, call
+`textkit.control.configure(command="./bin/textkit")` before using the default.
+`textkit.control.close()` resets it explicitly.
+
+Create instances when you want separately owned state:
 
 ```python
 from textkit import TextKit, AsyncTextKit
@@ -79,9 +96,11 @@ pairs; help lists operation descriptions and `schema` describes their fields.
 
 | Caller | Connection and daemon | Go state/cache |
 | --- | --- | --- |
+| Module functions and `aio` in one Python process | One lazy default per generated module | Shared |
 | Threads sharing one client | One multiplexed stdio connection | Shared |
 | Async tasks sharing one client | Same connection; no event-loop-owned transport | Shared |
 | Different clients in one process | Separate connections and daemons | Isolated |
+| `control.scope(...)` / `async with control.scope(...)` | Separate client for the current context | Isolated; previous client restored on exit |
 | Pickled client sent with spawn/forkserver | New connection and daemon on first use | Fresh |
 | Inherited client after fork | Child closes inherited pipe copies, resets local transport | Fresh; parent remains usable |
 
@@ -131,7 +150,7 @@ PYTHONPATH=examples/textkit python -c 'from textkit import TextKit; k=TextKit(".
 python tools/check.py
 ```
 
-`tools/check.py` is portable, builds the example, checks generated-file drift,
+`tools/check.py` is portable, builds the examples, checks generated-file drift,
 runs Go tests with the race detector and vet, and runs pytest/pytest-asyncio integration
 tests against actual subprocesses. CI covers Linux, macOS and Windows and
 Python 3.10, 3.12 and 3.14, plus the minimum Go version.

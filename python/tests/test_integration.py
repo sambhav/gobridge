@@ -16,7 +16,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "examples/textkit"))
 from textkit import Analysis, AsyncTextKit, TextKit
-from gobridge import BusyError, Client, ClosedError, DaemonError, InvalidArgumentError, RequestTimeout
+from gobridge import BusyError, Client, ClosedError, DaemonError, InvalidArgumentError, RequestTimeout, RuntimeOptions
 
 BINARY = str(ROOT / "bin" / ("textkit.exe" if os.name == "nt" else "textkit"))
 
@@ -97,7 +97,7 @@ class Integration(unittest.TestCase):
                 client.health()
 
     def test_bounded_pending(self):
-        with TextKit(BINARY, max_pending=1) as client:
+        with TextKit(BINARY, _runtime=RuntimeOptions(max_pending=1)) as client:
             request_id, future = client._transport.submit("wait", {"milliseconds": 10000}, 20)
             with self.assertRaises(BusyError):
                 client.health()

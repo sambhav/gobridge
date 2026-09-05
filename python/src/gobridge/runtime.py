@@ -16,13 +16,47 @@ import os
 import queue
 import shutil
 import subprocess
+import sys
 import threading
+import time
 import types
 import typing
 import weakref
 from pathlib import Path
 
 MAX_FRAME = 1024 * 1024
+
+
+def _command_args(command):
+    if isinstance(command, (str, os.PathLike)):
+        command = (command,)
+    command = tuple(os.fspath(part) for part in command)
+    if not command:
+        raise ValueError("a command is required")
+    return command
+
+
+def _validate_options(timeout, max_pending, startup_timeout):
+    if not isinstance(max_pending, int) or isinstance(max_pending, bool) or max_pending < 1:
+        raise ValueError("max_pending must be a positive integer")
+    for name, value in (("timeout", timeout), ("startup_timeout", startup_timeout)):
+        if not math.isfinite(value) or not 0 < value <= 86400:
+            raise ValueError(f"{name} must be finite and in (0, 86400] seconds")
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class RuntimeOptions:
+    """Advanced process options, separate from a library's constructor inputs."""
+
+    command: str | os.PathLike | typing.Sequence[str] | None = None
+    timeout: float = 30
+    max_pending: int = 128
+    startup_timeout: float = 5
+
+    def __post_init__(self):
+        _validate_options(self.timeout, self.max_pending, self.startup_timeout)
+        if self.command is not None:
+            object.__setattr__(self, "command", _command_args(self.command))
 
 
 def resolve_binary(module_file: str, name: str) -> str:
@@ -64,6 +98,9 @@ class ClosedError(BridgeError):
 
 
 def _error(data):
+    if (not isinstance(data, dict) or not isinstance(data.get("code"), str)
+            or not isinstance(data.get("message"), str)):
+        raise ValueError("invalid daemon error envelope")
     cls = {"invalid_argument": InvalidArgumentError, "busy": BusyError,
            "deadline_exceeded": RequestTimeout}.get(data["code"], BridgeError)
     return cls(data["code"], data["message"])
@@ -80,7 +117,10 @@ T = typing.TypeVar("T")
 
 @lru_cache(maxsize=512)
 def _type_hints(cls):
-    return typing.get_type_hints(cls)
+    # Generated fields may share a name with a private/lowercase model type.
+    # Class locals then contain the field's default (often None), not the type.
+    namespace = vars(sys.modules[cls.__module__])
+    return typing.get_type_hints(cls, globalns=namespace, localns=namespace)
 
 
 def decode(cls: type[T], value: typing.Any) -> T:
@@ -101,34 +141,52 @@ def decode(cls: type[T], value: typing.Any) -> T:
 
 
 class _Transport:
-    def __init__(self, command, max_pending, expected_schema):
+    def __init__(self, command, max_pending, expected_schema, init_json, startup_timeout):
         self.owner_pid = os.getpid()
         self.lock = threading.Lock()
+        self._close_lock = threading.Lock()
         self.pending = {}
         self.seq = 0
         self.max_pending = max_pending
         self.failure = None
         self.outbox = queue.Queue(maxsize=max_pending * 2 + 4)
-        # Unbuffered FileIO can be detached in a fork child without acquiring
-        # locks owned by a vanished Python reader/writer thread.
-        self.proc = subprocess.Popen(
-            [*command, "serve"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=None, bufsize=0, close_fds=True,
-        )
-        self.reader = threading.Thread(target=self._read, daemon=True, name="gobridge-reader")
-        self.writer = threading.Thread(target=self._write, daemon=True, name="gobridge-writer")
-        self.reader.start()
-        self.writer.start()
+        self.proc = self.reader = self.writer = None
+        deadline = time.monotonic() + startup_timeout
         try:
-            _, f = self.submit("$hello", {}, 5)
-            hello = f.result(timeout=5)
-            if hello.get("protocol") != 1:
+            # Register even an in-flight startup before fork can copy its pipe
+            # descriptors. The handshake/constructor never holds this gate.
+            with _fork_lock:
+                self.proc = subprocess.Popen(
+                    [*command, "serve"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=None, bufsize=0, close_fds=True,
+                )
+                self.reader = threading.Thread(target=self._read, daemon=True, name="gobridge-reader")
+                self.writer = threading.Thread(target=self._write, daemon=True, name="gobridge-writer")
+                _transports.add(self)
+                self.reader.start()
+                self.writer.start()
+            hello = self._startup_call("$hello", {}, deadline)
+            if not isinstance(hello, dict) or hello.get("protocol") != 1:
                 raise DaemonError("protocol", "unsupported daemon protocol version")
             if expected_schema is not None and hello.get("schema_hash") != expected_schema:
                 raise DaemonError("schema_mismatch", "bindings and daemon differ; regenerate bindings or install the matching binary")
+            if hello.get("constructor") is not None:
+                self._startup_call("$init", {} if init_json is None else json.loads(init_json), deadline)
+            elif init_json is not None:
+                raise DaemonError("schema_mismatch", "initialization options supplied for a daemon without a constructor")
         except BaseException:
             self.close()
             raise
+
+    def _startup_call(self, method, params, deadline):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RequestTimeout("deadline_exceeded", "daemon startup deadline exceeded")
+        _, future = self.submit(method, params, remaining)
+        try:
+            return future.result(timeout=remaining)
+        except futures.TimeoutError:
+            raise RequestTimeout("deadline_exceeded", "daemon startup deadline exceeded") from None
 
     def submit(self, method, params, timeout):
         if timeout is not None and (not math.isfinite(timeout) or not 0 < timeout <= 86400):
@@ -217,12 +275,15 @@ class _Transport:
                         raise ValueError("invalid daemon response")
                     if ("error" in msg) == ("result" in msg):
                         raise ValueError("response needs exactly one of result or error")
+                    # Decode before removing its future: malformed envelopes
+                    # must fail every waiter, including this response's owner.
+                    error = _error(msg["error"]) if "error" in msg else None
                     with self.lock:
                         f = self.pending.pop(msg["id"], None)
                     # A late result for a cancelled/timed-out request is ignored.
                     if f is not None and not f.done():
-                        if "error" in msg:
-                            f.set_exception(_error(msg["error"]))
+                        if error is not None:
+                            f.set_exception(error)
                         else:
                             f.set_result(msg["result"])
                 if len(buffer) > MAX_FRAME:
@@ -233,31 +294,36 @@ class _Transport:
     def detach_after_fork(self):
         # Only close this child's copies. Never signal or wait for the parent's
         # daemon. FileIO is unbuffered; Popen must not try to reap it here.
-        for stream in (self.proc.stdin, self.proc.stdout):
-            stream.close()
-        self.proc.returncode = 0
+        if self.proc is not None:
+            for stream in (self.proc.stdin, self.proc.stdout):
+                stream.close()
+            self.proc.returncode = 0
 
     def close(self):
         if os.getpid() != self.owner_pid:
             self.detach_after_fork()
             return
-        self._fail(ClosedError("closed", "client has been closed"))
-        # Kill first if a writer is blocked on a stopped/non-reading daemon.
-        if self.proc.poll() is None:
-            self.proc.terminate()
-        try:
-            self.proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
-            self.proc.wait(timeout=2)
-        for thread in (self.reader, self.writer):
-            if thread is not threading.current_thread():
-                thread.join(timeout=2)
-        for stream in (self.proc.stdin, self.proc.stdout):
-            stream.close()
+        with self._close_lock:
+            self._fail(ClosedError("closed", "client has been closed"))
+            if self.proc is None:
+                return
+            # Kill first if a writer is blocked on a stopped/non-reading daemon.
+            if self.proc.poll() is None:
+                self.proc.terminate()
+            try:
+                self.proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait(timeout=2)
+            for thread in (self.reader, self.writer):
+                if thread is not None and thread.ident is not None and thread is not threading.current_thread():
+                    thread.join(timeout=2)
+            for stream in (self.proc.stdin, self.proc.stdout):
+                stream.close()
 
 
 _clients = weakref.WeakSet()
+_transports = weakref.WeakSet()
 _fork_lock = threading.RLock()
 
 
@@ -270,14 +336,18 @@ def _after_parent():
 
 
 def _after_child():
-    global _fork_lock
+    global _fork_lock, _transports
+    # Startup transports may not have been published on their Client yet.
+    for transport in list(_transports):
+        transport.detach_after_fork()
+    _transports = weakref.WeakSet()
     for client in list(_clients):
-        if client._transport is not None:
-            client._transport.detach_after_fork()
         if client._finalizer is not None:
             client._finalizer.detach()
         client._finalizer = None
         client._transport = None
+        client._startup_error = None
+        client._lifecycle = threading.RLock()
     _fork_lock = threading.RLock()
 
 
@@ -295,36 +365,52 @@ class Client:
     """
 
     def __init__(self, command: str | os.PathLike | typing.Sequence[str], *,
-                 timeout: float = 30, max_pending: int = 128, expected_schema: str | None = None):
-        if isinstance(command, (str, os.PathLike)):
-            command = [os.fspath(command)]
-        self.command = tuple(command)
-        if not self.command or max_pending < 1:
-            raise ValueError("a command and positive max_pending are required")
-        if not math.isfinite(timeout) or not 0 < timeout <= 86400:
-            raise ValueError("default timeout must be finite and in (0, 86400]")
+                 timeout: float = 30, max_pending: int = 128, expected_schema: str | None = None,
+                 init: dict | None = None, startup_timeout: float = 5):
+        self.command = _command_args(command)
+        _validate_options(timeout, max_pending, startup_timeout)
         self.timeout, self.max_pending = timeout, max_pending
+        self.startup_timeout = startup_timeout
         self.expected_schema = expected_schema
+        if init is not None and not isinstance(init, dict):
+            raise TypeError("init must be a dictionary or None")
+        # Snapshot nested data now: mutating caller-owned lists/dicts later must
+        # not change a lazy client's constructor or a multiprocessing clone.
+        self._init_json = None if init is None else json.dumps(
+            init, default=_json_default, allow_nan=False, separators=(",", ":"))
         self._transport = None
         self._finalizer = None
+        self._startup_error = None
+        self._lifecycle = threading.RLock()
         self._closed = False
         with _fork_lock:
             _clients.add(self)
 
     def __getstate__(self):
-        return self.command, self.timeout, self.max_pending, self.expected_schema, self._closed
+        return (self.command, self.timeout, self.max_pending, self.expected_schema,
+                self._init_json, self.startup_timeout, self._closed)
 
     def __setstate__(self, state):
-        command, timeout, max_pending, expected_schema, closed = state
-        Client.__init__(self, command, timeout=timeout, max_pending=max_pending, expected_schema=expected_schema)
+        command, timeout, max_pending, expected_schema, init_json, startup_timeout, closed = state
+        Client.__init__(self, command, timeout=timeout, max_pending=max_pending, expected_schema=expected_schema,
+                        init=None if init_json is None else json.loads(init_json), startup_timeout=startup_timeout)
         self._closed = closed
 
     def _ensure(self):
-        with _fork_lock:
+        with self._lifecycle:
             if self._closed:
                 raise ClosedError("closed", "client has been closed")
+            if self._startup_error is not None:
+                raise self._startup_error
             if self._transport is None:
-                self._transport = _Transport(self.command, self.max_pending, self.expected_schema)
+                try:
+                    self._transport = _Transport(self.command, self.max_pending, self.expected_schema,
+                                                 self._init_json, self.startup_timeout)
+                except BaseException as error:
+                    # Constructor side effects can outlive a failed response.
+                    # Retry requires an explicit new client/session.
+                    self._startup_error = error
+                    raise
                 self._finalizer = weakref.finalize(self, self._transport.close)
             return self._transport
 
@@ -374,7 +460,7 @@ class Client:
             raise
 
     def close(self):
-        with _fork_lock:
+        with self._lifecycle:
             self._closed = True
             if self._transport is not None:
                 self._transport.close()
@@ -393,7 +479,13 @@ class Client:
         self.close()
 
     async def __aenter__(self):
-        await asyncio.to_thread(self.start)
+        try:
+            await asyncio.to_thread(self.start)
+        except BaseException:
+            # A cancelled context entry has no body/exit to own its daemon.
+            # Close waits for a bounded startup and reaps any process it made.
+            await self.aclose()
+            raise
         return self
 
     async def __aexit__(self, *args):

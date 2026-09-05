@@ -1,9 +1,11 @@
 from .runtime import (
     AsyncClient, BridgeError, BusyError, Client, ClosedError, DaemonError,
-    InvalidArgumentError, RequestTimeout, decode, resolve_binary,
+    InvalidArgumentError, RequestTimeout, RuntimeOptions, decode, resolve_binary,
 )
+from .defaults import DefaultControl
 
 __all__ = [
     "AsyncClient", "BridgeError", "BusyError", "Client", "ClosedError",
-    "DaemonError", "InvalidArgumentError", "RequestTimeout", "decode", "resolve_binary",
+    "DaemonError", "DefaultControl", "InvalidArgumentError", "RequestTimeout", "RuntimeOptions",
+    "decode", "resolve_binary",
 ]

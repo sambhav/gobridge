@@ -24,6 +24,21 @@ type Response struct {
 	Error  *Error `json:"error,omitempty"`
 }
 
+// A successful void operation must include result:null. Omitting it would make
+// the response indistinguishable from an invalid envelope to strict clients.
+func (r Response) MarshalJSON() ([]byte, error) {
+	if r.Error != nil {
+		return json.Marshal(struct {
+			ID    string `json:"id"`
+			Error *Error `json:"error"`
+		}{r.ID, r.Error})
+	}
+	return json.Marshal(struct {
+		ID     string `json:"id"`
+		Result any    `json:"result"`
+	}{r.ID, r.Result})
+}
+
 // Serve owns one session. EOF cancels all calls and returns immediately;
 // cooperative handlers stop via their context. The hosting main must exit on
 // return. stdout is exclusively protocol data; send logging to stderr.
@@ -104,6 +119,8 @@ func (r *Registry) Serve(parent context.Context, in io.Reader, out io.Writer, ma
 			var err error
 			if req.Method == "$hello" {
 				result = r.Schema()
+			} else if req.Method == "$init" {
+				err = r.Initialize(c, req.Params)
 			} else {
 				result, err = r.Call(c, req.Method, req.Params)
 			}
