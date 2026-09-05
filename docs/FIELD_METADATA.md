@@ -1,6 +1,6 @@
 # Shared field documentation and validation
 
-Status: design published before implementation. This increment adds field
+Status: implemented in the draft PR after this design was published. This increment adds field
 documentation and a small, strict set of validation constraints to the existing
 Go wire types. Defaults and new omission or null behavior are separate work.
 

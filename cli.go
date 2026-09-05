@@ -41,21 +41,85 @@ func cliType(t Type) string {
 	}
 }
 
-// cliFields formats schema fields without reflecting on or constructing values.
+func cliFieldNotes(field Field) string {
+	notes := strings.Join(strings.Fields(field.Description), " ")
+	if c := field.Constraints; c != nil {
+		var limits []string
+		if c.Minimum != "" {
+			limits = append(limits, "min="+string(c.Minimum))
+		}
+		if c.Maximum != "" {
+			limits = append(limits, "max="+string(c.Maximum))
+		}
+		if c.MinLength != nil {
+			limits = append(limits, fmt.Sprintf("minlen=%d", *c.MinLength))
+		}
+		if c.MaxLength != nil {
+			limits = append(limits, fmt.Sprintf("maxlen=%d", *c.MaxLength))
+		}
+		if len(limits) > 0 {
+			if notes != "" {
+				notes += " "
+			}
+			notes += "(" + strings.Join(limits, ", ") + ")"
+		}
+	}
+	return notes
+}
+
+func cliField(out io.Writer, name string, field Field) {
+	required := "required"
+	if field.Type.Kind == "ptr" {
+		required = "optional"
+	}
+	fmt.Fprintf(out, "  %s\t%s\t%s", name, cliType(field.Type), required)
+	if notes := cliFieldNotes(field); notes != "" {
+		fmt.Fprintf(out, "\t%s", notes)
+	}
+	fmt.Fprintln(out)
+}
+
+// cliFields renders the same metadata used by validation and Python generation.
 // Configuration uses JSON keys; operation arguments use kebab-case flags.
+// Nested structs describe JSON members, never additional CLI flags.
 func cliFields(out io.Writer, fields []Field, flags bool) {
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	for _, field := range fields {
-		name, required := field.Name, "required"
+		name := field.Name
 		if flags {
 			name = "--" + strings.ReplaceAll(name, "_", "-")
 		}
-		if field.Type.Kind == "ptr" {
-			required = "optional"
-		}
-		fmt.Fprintf(w, "  %s\t%s\t%s\n", name, cliType(field.Type), required)
+		cliField(w, name, field)
 	}
 	_ = w.Flush()
+}
+
+func cliNestedFields(out io.Writer, fields []Field) {
+	var nested strings.Builder
+	nestedWriter := tabwriter.NewWriter(&nested, 0, 4, 2, ' ', 0)
+	var visit func(Field, string)
+	visit = func(field Field, path string) {
+		t := field.Type
+		for t.Kind == "ptr" {
+			t = *t.Elem
+		}
+		if t.Kind != "struct" {
+			return
+		}
+		for _, child := range t.Fields {
+			childPath := path + "." + child.Name
+			cliField(nestedWriter, childPath, child)
+			visit(child, childPath)
+		}
+	}
+	for _, field := range fields {
+		visit(field, field.Name)
+	}
+	_ = nestedWriter.Flush()
+	if nested.Len() > 0 {
+		fmt.Fprintln(out, "\nNested JSON members (requiredness applies when their parent is provided):")
+		fmt.Fprint(out, nested.String())
+	}
 }
 
 func (r *Registry) cliConfigHelp(out io.Writer) {
@@ -64,7 +128,9 @@ func (r *Registry) cliConfigHelp(out io.Writer) {
 	}
 	fmt.Fprintln(out, "\nConstructor: --config OBJECT before the operation (omitted: {}).")
 	fmt.Fprintln(out, "JSON configuration fields:")
-	cliFields(out, describe(r.constructor.config).Fields, false)
+	fields := describe(r.constructor.config).Fields
+	cliFields(out, fields, false)
+	cliNestedFields(out, fields)
 }
 
 func (r *Registry) cliHelp(out io.Writer) {
@@ -99,9 +165,11 @@ func (r *Registry) cliOperationHelp(name string, out io.Writer) error {
 	}
 	fmt.Fprintf(out, "\nUsage: %s %s%s [--field value ... | --json OBJECT | --json -]\n", filepath.Base(os.Args[0]), config, name)
 	fmt.Fprintln(out, "\nFlags:")
-	cliFields(out, op.inputSchema().Fields, true)
+	fields := op.inputSchema().Fields
+	cliFields(out, fields, true)
 	fmt.Fprintln(out, "  --json OBJECT  Read the whole input as JSON; use - for stdin.")
 	fmt.Fprintln(out, "  -h, --help     Show this help without running the operation.")
+	cliNestedFields(out, fields)
 	fmt.Fprintf(out, "\nResult: %s\n", cliType(describe(op.out)))
 	r.cliConfigHelp(out)
 	return nil

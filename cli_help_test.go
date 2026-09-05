@@ -194,3 +194,127 @@ func TestCLIHelpDoesNotConsumeAStringFlagValue(t *testing.T) {
 		t.Fatal("accepted --config on a registry with no constructor")
 	}
 }
+
+type cliMetadataAddress struct {
+	City string `json:"city" doc:"City name." validate:"maxlen=80"`
+}
+
+type cliMetadataRequest struct {
+	DisplayName string              `json:"display_name" doc:"Name to greet." validate:"minlen=1,maxlen=80"`
+	Age         *int                `json:"age,omitempty" doc:"Optional age in years." validate:"min=0,max=120"`
+	Large       int64               `json:"large" doc:"Exact integer limit." validate:"min=9007199254740993,max=9223372036854775807"`
+	Empty       string              `json:"empty" validate:"minlen=0,maxlen=0"`
+	Address     *cliMetadataAddress `json:"address,omitempty" doc:"Optional postal address."`
+}
+
+func TestCLIHelpDisplaysSharedFieldDocumentationAndLimits(t *testing.T) {
+	r := New()
+	if err := Register(r, "inspect", "Documented input.", func(context.Context, cliMetadataRequest) (cliHelpModel, error) {
+		panic("help must not call the handler")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	if err := r.Run(context.Background(), []string{"inspect", "--help"}, strings.NewReader(""), &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"--display-name string required Name to greet. (minlen=1, maxlen=80)",
+		"--age integer or null optional Optional age in years. (min=0, max=120)",
+		"--large integer required Exact integer limit. (min=9007199254740993, max=9223372036854775807)",
+		"--empty string required (minlen=0, maxlen=0)",
+		"--address cliMetadataAddress or null optional Optional postal address.",
+		"address.city string required City name. (maxlen=80)",
+	} {
+		requireHelpLine(t, out.String(), expected)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("help wrote an error: %s", stderr.String())
+	}
+}
+
+func TestCLIBoundStructHelpShowsJSONPathsWithoutInventingFlags(t *testing.T) {
+	r := New()
+	var calls atomic.Int64
+	if err := Bind(r, "greet", func(request cliMetadataRequest) string {
+		calls.Add(1)
+		return "Hello, " + request.DisplayName
+	}, "request"); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	if err := r.Run(context.Background(), []string{"greet", "--help"}, strings.NewReader(""), &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"--request cliMetadataRequest required",
+		"request.display_name string required Name to greet. (minlen=1, maxlen=80)",
+		"request.age integer or null optional Optional age in years. (min=0, max=120)",
+		"request.address cliMetadataAddress or null optional Optional postal address.",
+		"request.address.city string required City name. (maxlen=80)",
+	} {
+		requireHelpLine(t, out.String(), expected)
+	}
+	if !strings.Contains(out.String(), "Nested JSON members (requiredness applies when their parent is provided)") {
+		t.Fatal("help does not explain that nested paths are JSON members")
+	}
+	for _, invented := range []string{"--request.display_name", "--request-display-name", "--display-name", "--city"} {
+		if strings.Contains(out.String(), invented) {
+			t.Fatalf("help invented nested flag %q", invented)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatal("help called the handler")
+	}
+
+	// The documented limits are enforced by the actual operation path, with
+	// the same nested field names and no output or handler call on failure.
+	out.Reset()
+	bad := `{"display_name":"","large":9007199254740993,"empty":""}`
+	err := r.Run(context.Background(), []string{"greet", "--request", bad}, strings.NewReader(""), &out, &stderr)
+	if err == nil || wireError(err).Code != "invalid_argument" || !strings.Contains(err.Error(), "request.display_name") {
+		t.Fatalf("CLI did not enforce the displayed nested constraint: %v", err)
+	}
+	if out.Len() != 0 || calls.Load() != 0 {
+		t.Fatal("invalid input produced a result or reached the handler")
+	}
+	valid := `{"display_name":"Ada","large":9007199254740993,"empty":""}`
+	if err := r.Run(context.Background(), []string{"greet", "--request", valid}, strings.NewReader(""), &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "\"Hello, Ada\"\n" || calls.Load() != 1 {
+		t.Fatal("valid JSON input stopped working after metadata inspection")
+	}
+}
+
+func TestCLIConstructorHelpUsesJSONNamesAndSharedMetadata(t *testing.T) {
+	r := New()
+	var constructors atomic.Int64
+	object, err := NewObject(r, func(cliMetadataRequest) *boundCounter {
+		constructors.Add(1)
+		return &boundCounter{}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := object.Bind("add", (*boundCounter).Add, "amount"); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	if err := r.Run(context.Background(), []string{"add", "--help"}, strings.NewReader(""), &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"display_name string required Name to greet. (minlen=1, maxlen=80)",
+		"age integer or null optional Optional age in years. (min=0, max=120)",
+		"address.city string required City name. (maxlen=80)",
+	} {
+		requireHelpLine(t, out.String(), expected)
+	}
+	if strings.Contains(out.String(), "--display-name") || strings.Contains(out.String(), "--address.city") {
+		t.Fatal("constructor JSON fields were presented as operation flags")
+	}
+	if constructors.Load() != 0 || !r.NeedsInit() || stderr.Len() != 0 {
+		t.Fatal("metadata inspection initialized the object or reported errors")
+	}
+}

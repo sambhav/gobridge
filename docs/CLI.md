@@ -48,6 +48,8 @@ All three operation-help forms show the same information:
 - Operation name and description.
 - Invocation using field flags, a JSON object, or JSON from stdin.
 - Each field's kebab-case flag, wire type, and required/optional status.
+- Field documentation and declared numeric or length limits, from the same
+  schema used by the Go validator and Python generator.
 - The returned scalar or named Go model type.
 - Constructor configuration fields, when the registry declares a constructor.
 
@@ -56,7 +58,8 @@ the result as `Greeting`. A bound Go function returning `string` reports a
 string result; a function without a result reports null. Structs use their Go
 type names, and scalar types use familiar names such as string, boolean,
 integer, and number. Pointer/container descriptions show whether null is
-accepted. Schema inspection remains available for complete nested fields:
+accepted. Schema inspection remains available for complete nested fields,
+including fields inside arrays and map values:
 
 ```sh
 hello schema
@@ -64,6 +67,38 @@ hello schema
 
 Help is a metadata operation. It does not call handlers, initialize a Go
 object, or validate credentials. No constructor is needed to inspect a command.
+
+### Document fields and discover nested JSON objects
+
+Go `doc` and `validate` tags are visible in help:
+
+```go
+type GreetingRequest struct {
+    Name string `json:"name" doc:"Name to greet." validate:"minlen=1,maxlen=80"`
+    Age  *int   `json:"age,omitempty" doc:"Optional age in years." validate:"min=0,max=120"`
+}
+```
+
+The name's help includes `Name to greet.` and `minlen=1, maxlen=80`. Numeric
+limits use `min` and `max`; length limits use `minlen` and `maxlen`, matching the
+declarations. Numeric limits retain their exact values, including large int64
+bounds. Constructor fields use the same rendering.
+
+When a bound Go function accepts a request struct, its CLI accepts one JSON
+object flag:
+
+```sh
+greeter greet --request '{"name":"Ada","age":37}'
+```
+
+Help lists `--request` as the actual flag. A separate nested JSON section shows
+`request.name` and `request.age`, including their descriptions and constraints.
+These paths identify JSON members; they are not additional flags. Deeper named
+structs get paths such as `request.address.city`. Requiredness applies when the
+containing object is supplied; an optional parent can still be omitted or null.
+Arrays and maps show their element/value type names; use `schema` for their
+complete nested definitions. See [field metadata](FIELD_METADATA.md) for the
+shared validation contract.
 
 ## Discover and supply constructor configuration
 

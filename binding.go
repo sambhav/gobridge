@@ -88,6 +88,9 @@ func compileBinding(name string, fn reflect.Value, receiver func() reflect.Value
 		}
 	}
 	input := reflect.StructOf(fields)
+	if _, err := prepareStruct(input); err != nil {
+		return operation{}, err
+	}
 	var inputName strings.Builder
 	for _, part := range strings.Split(name, "_") {
 		if part != "" {

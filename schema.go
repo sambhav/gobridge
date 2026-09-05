@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 var pythonKeywords = func() map[string]bool {
@@ -79,18 +81,12 @@ func validateType(t reflect.Type, seen map[reflect.Type]bool) error {
 		if t.Name() == "" {
 			return fmt.Errorf("anonymous structs are unsupported")
 		}
-		names := map[string]bool{}
-		for j := 0; j < t.NumField(); j++ {
-			f := t.Field(j)
-			n, err := fieldName(f)
-			if err != nil {
-				return err
-			}
-			if names[n] {
-				return fmt.Errorf("duplicate JSON field %s", n)
-			}
-			names[n] = true
-			if err = validateType(f.Type, seen); err != nil {
+		fields, err := prepareStruct(t)
+		if err != nil {
+			return err
+		}
+		for _, f := range fields {
+			if err = validateType(f.typ, seen); err != nil {
 				return err
 			}
 		}
@@ -103,63 +99,100 @@ func validateType(t reflect.Type, seen map[reflect.Type]bool) error {
 // validateValue prevents encoding/json silently accepting missing required
 // fields or null for scalar values. Numeric range/type checks remain in Go.
 func validateValue(raw json.RawMessage, t reflect.Type) error {
+	return validateNode(raw, t, nil, "")
+}
+
+func validationAt(path string, err error) error {
+	if err == nil || path == "" {
+		return err
+	}
+	return fmt.Errorf("%s: %w", path, err)
+}
+
+func childPath(parent, field string) string {
+	if parent == "" {
+		return field
+	}
+	return parent + "." + field
+}
+
+func validateNode(raw json.RawMessage, t reflect.Type, rules *fieldRules, path string) error {
 	raw = bytes.TrimSpace(raw)
 	if t.Kind() == reflect.Pointer {
 		if string(raw) == "null" {
 			return nil
 		}
-		return validateValue(raw, t.Elem())
+		return validateNode(raw, t.Elem(), rules, path)
 	}
 	if string(raw) == "null" && (t.Kind() == reflect.Slice || t.Kind() == reflect.Map) {
 		return nil
 	}
 	if string(raw) == "null" {
-		return fmt.Errorf("null is not allowed for %s", t)
+		return validationAt(path, fmt.Errorf("null is not allowed for %s", t))
 	}
 	switch t.Kind() {
 	case reflect.Struct:
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &fields); err != nil {
-			return err
+			return validationAt(path, err)
 		}
-		for j := 0; j < t.NumField(); j++ {
-			f := t.Field(j)
-			n, _ := fieldName(f)
-			v, ok := fields[n]
+		metadata, err := prepareStruct(t)
+		if err != nil {
+			return validationAt(path, err)
+		}
+		for _, f := range metadata {
+			v, ok := fields[f.name]
+			fieldPath := childPath(path, f.name)
 			if !ok {
-				if f.Type.Kind() == reflect.Pointer {
+				if f.typ.Kind() == reflect.Pointer {
 					continue
 				}
-				return fmt.Errorf("missing field %s", n)
+				return validationAt(fieldPath, fmt.Errorf("missing required field"))
 			}
-			if err := validateValue(v, f.Type); err != nil {
-				return fmt.Errorf("%s: %w", n, err)
+			if err := validateNode(v, f.typ, f.rules, fieldPath); err != nil {
+				return err
 			}
-			delete(fields, n)
+			delete(fields, f.name)
 		}
 		for n := range fields {
-			return fmt.Errorf("unknown field %s", n)
+			return validationAt(childPath(path, n), fmt.Errorf("unknown field"))
 		}
 	case reflect.Slice:
 		var values []json.RawMessage
 		if err := json.Unmarshal(raw, &values); err != nil {
-			return err
+			return validationAt(path, err)
 		}
-		for _, v := range values {
-			if err := validateValue(v, t.Elem()); err != nil {
+		if err := rules.checkLength(len(values)); err != nil {
+			return validationAt(path, err)
+		}
+		for j, v := range values {
+			if err := validateNode(v, t.Elem(), nil, path+"["+strconv.Itoa(j)+"]"); err != nil {
 				return err
 			}
 		}
 	case reflect.Map:
 		var values map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &values); err != nil {
-			return err
+			return validationAt(path, err)
 		}
-		for _, v := range values {
-			if err := validateValue(v, t.Elem()); err != nil {
+		if err := rules.checkLength(len(values)); err != nil {
+			return validationAt(path, err)
+		}
+		for key, v := range values {
+			if err := validateNode(v, t.Elem(), nil, path+"["+strconv.Quote(key)+"]"); err != nil {
 				return err
 			}
 		}
+	case reflect.String:
+		if rules != nil {
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return validationAt(path, err)
+			}
+			return validationAt(path, rules.checkLength(utf8.RuneCountInString(value)))
+		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Float32, reflect.Float64:
+		return validationAt(path, rules.checkNumber(raw, t))
 	}
 	return nil
 }
@@ -171,8 +204,10 @@ type Type struct {
 	Fields []Field `json:"fields,omitempty"`
 }
 type Field struct {
-	Name string `json:"name"`
-	Type Type   `json:"type"`
+	Name        string       `json:"name"`
+	Type        Type         `json:"type"`
+	Description string       `json:"description,omitempty"`
+	Constraints *Constraints `json:"constraints,omitempty"`
 }
 type Operation struct {
 	Name        string `json:"name"`
@@ -198,10 +233,9 @@ func describe(t reflect.Type) Type {
 		s.Elem = &e
 	case reflect.Struct:
 		s.Name = t.Name()
-		for j := 0; j < t.NumField(); j++ {
-			f := t.Field(j)
-			n, _ := fieldName(f)
-			s.Fields = append(s.Fields, Field{n, describe(f.Type)})
+		fields, _ := prepareStruct(t)
+		for _, f := range fields {
+			s.Fields = append(s.Fields, Field{Name: f.name, Type: describe(f.typ), Description: f.description, Constraints: f.rules.schema()})
 		}
 	}
 	return s

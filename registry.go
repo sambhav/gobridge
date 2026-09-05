@@ -166,6 +166,11 @@ func (r *Registry) Call(ctx context.Context, name string, params json.RawMessage
 	if r.NeedsInit() {
 		return nil, Failure("failed_precondition", "initialize the service before calling operations")
 	}
+	// Initialization may have held initMu while this request's deadline expired.
+	// Do not invoke a context-free function after waiting for that initialization.
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
 	result, err = op.call(ctx, params)
 	if err == nil {
 		err = ctx.Err()
