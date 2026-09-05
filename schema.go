@@ -25,7 +25,7 @@ var pythonReserved = func() map[string]bool {
 	for n := range pythonKeywords {
 		m[n] = true
 	}
-	for _, n := range strings.Fields("call acall close aclose start lifecycle control aio RuntimeOptions DefaultControl _client command timeout max_pending expected_schema serve schema help generate_python") {
+	for _, n := range strings.Fields("call acall close aclose start lifecycle control aio RuntimeOptions DefaultControl _client command timeout max_pending expected_schema serve schema help generate_python generate_typescript") {
 		m[n] = true
 	}
 	return m

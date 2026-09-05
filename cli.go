@@ -146,6 +146,7 @@ func (r *Registry) cliHelp(out io.Writer) {
 	fmt.Fprintln(out, "  serve            Run the private stdio daemon.")
 	fmt.Fprintln(out, "  schema           Print the complete JSON schema.")
 	fmt.Fprintln(out, "  generate-python  Generate typed Python functions and clients.")
+	fmt.Fprintln(out, "  generate-typescript  Generate typed TypeScript functions and clients.")
 	fmt.Fprintf(out, "\nHelp: %s <operation> --help or %s help <operation>\n", program, program)
 	r.cliConfigHelp(out)
 }
@@ -185,7 +186,7 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 		}
 		config = json.RawMessage(args[1])
 		args = args[2:]
-		if args[0] == "serve" || args[0] == "schema" || args[0] == "generate-python" || args[0] == "help" || cliHelpFlag(args[0]) {
+		if args[0] == "serve" || args[0] == "schema" || args[0] == "generate-python" || args[0] == "generate-typescript" || args[0] == "help" || cliHelpFlag(args[0]) {
 			return fmt.Errorf("--config is supported for direct operation commands only")
 		}
 	}
@@ -232,6 +233,18 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 			return fmt.Errorf("unexpected arguments")
 		}
 		return r.GeneratePython(out, *class, *binary)
+	case "generate-typescript":
+		flags := flag.NewFlagSet("generate-typescript", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		class := flags.String("class", "Service", "TypeScript client class name")
+		binary := flags.String("binary", "service", "bundled executable name")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 {
+			return fmt.Errorf("unexpected arguments")
+		}
+		return r.GenerateTypeScript(out, *class, *binary)
 	}
 	op, ok := r.ops[args[0]]
 	if !ok {

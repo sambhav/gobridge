@@ -21,7 +21,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test test/*.test.mjs"
+    "test": "npm run build && node --test test/codec.test.mjs test/runtime.test.mjs",
+    "test:integration": "python ../tools/check_typescript.py"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
