@@ -12,13 +12,18 @@
 - [x] Pickle configuration and fork detachment without parent-daemon ownership.
 - [x] Integration tests with actual daemons, race tests and cross-platform CI.
 - [x] Reference wheel recipe bundling cross-compiled Go executables.
+- [x] Source annotations generate adapters from ordinary functions and methods.
+- [x] Typed constructor options, scalar/void results and process-owned objects.
+- [x] Lazy importable functions, shared sync/async defaults and isolated scopes.
+- [x] Constructor failure, malformed protocol and in-flight-fork regression tests.
 
 These checks denote implemented code, not a released compatibility guarantee.
 CI and the validation notes record which environments were actually tested.
 
 ## Phase 2: harden the release boundary
 
-1. Run the CI matrix on real Linux, macOS and Windows; validate arm64 hosts.
+1. Continue the passing Linux/macOS/Windows CI matrix for each increment; add
+   native arm64-host coverage beyond cross-compilation.
 2. Add protocol fuzzing, long-running stress/soak tests, process-kill matrices,
    benchmarks and memory bounds under cancellation storms.
 3. Audit all inherited resource paths with platform experts; document supported

@@ -9,8 +9,11 @@ client deliberately shares this state. A different client is a different session
 
 The Python object is a typed facade, not a mirror of arbitrary Go pointers.
 Returning Go object identity across IPC requires a handle/lifetime protocol and
-is deferred. Values are copied through JSON. Existing Go code only needs adapters
-with `func(context.Context, Input) (Output, error)` signatures.
+is deferred. Values are copied through JSON. Go authors can opt in ordinary functions/methods with source annotations, use
+`Bind` directly, or use generic `Register` for explicit DTO adapters. A declared
+constructor initializes one Go receiver per daemon; it never runs for schema
+discovery. Generated module functions share a lazy process-local default client;
+explicit instances and ContextVar scopes provide independent state.
 
 ## Why stdio first
 
@@ -36,7 +39,10 @@ Responses may arrive out of order. This is a small custom protocol, not JSON-RPC
 ```
 
 The handshake returns `protocol: 1`, `schema_hash` and the operation schema.
-The hash is SHA-256 of Go's JSON serialization of the sorted operation schema.
+When a constructor is declared, the handshake also includes its configuration
+schema. Python then sends `$init` once, before publishing the started client.
+The hash is SHA-256 of Go's JSON serialization of the sorted operation schema
+and, where present, the constructor schema.
 Generated clients embed the server-produced hash; clients do not independently
 canonicalize JSON. Result/error responses have the request ID and exactly one
 of `result` or `error`. Cancellation notifications have no response.
@@ -63,7 +69,8 @@ contexts but are responsible for protecting any mutable Go library state.
 `Memo` is one supplied concurrency primitive, not a universal lock around handlers.
 
 Python's timeout bounds its wait after submission; a cold start has a separate
-5-second handshake timeout. The daemon's relative deadline begins when admitted.
+5-second startup timeout by default, configurable through `RuntimeOptions`.
+That budget covers both the handshake and constructor initialization. The daemon's relative deadline begins when admitted.
 Queued messages cannot run forever unnoticed: the caller sends cancellation
 when its own wait expires. Cancellation is best effort; non-cooperative Go work
 can occupy a slot until it finishes or the client closes the daemon.
@@ -71,12 +78,15 @@ can occupy a slot until it finishes or the client closes the daemon.
 ## Multiprocessing
 
 Spawn/forkserver pickle only the executable configuration, timeout, admission
-limit, schema fingerprint and closed state. Locks, pipes, futures and Go state
+limit, schema fingerprint, snapshotted constructor options, startup timeout and
+closed state. Locks, pipes, futures and Go state
 are never serialized. Unpickled live clients lazily start a fresh daemon.
 
 For fork, callbacks synchronize transport creation against forking, close the
 child's inherited unbuffered pipe copies, detach inherited finalizers, and reset
-the transport reference. The child does not terminate or wait for the parent's
+the transport reference and per-client lifecycle lock. Startup transports are
+registered before the handshake, so an in-progress constructor cannot leave
+untracked inherited pipes. Unrelated clients do not share a startup lock. The child does not terminate or wait for the parent's
 daemon. This also runs for clients the child never subsequently uses, so they
 do not keep the parent's pipe alive. The parent's transport continues unaffected.
 

@@ -11,7 +11,8 @@ def main():
     os.chdir(ROOT)
     subprocess.run(["go", "test", "-race", "./..."], check=True)
     subprocess.run(["go", "vet", "./..."], check=True)
-    for name, client_class in [("textkit", "TextKit"), ("hello", "Hello")]:
+    subprocess.run(["go", "run", "./cmd/gobridge", "generate", "--dir", "./examples/annotated", "--check"], check=True)
+    for name, client_class in [("textkit", "TextKit"), ("hello", "Hello"), ("annotated", "Greeter")]:
         binary = ROOT / "bin" / (name + (".exe" if os.name == "nt" else ""))
         binary.parent.mkdir(exist_ok=True)
         subprocess.run(["go", "build", "-o", str(binary), f"./examples/{name}"], check=True)

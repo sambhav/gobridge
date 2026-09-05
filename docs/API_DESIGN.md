@@ -4,8 +4,9 @@
 The Python convenience increment adds generated module functions, `aio`, lazy
 process-local defaults, explicit clients, `RuntimeOptions`, and scoped controls.
 Their runnable example and integration tests live in [Hello World](HELLO_WORLD.md).
-Direct Go function binding and constructor/method APIs below describe the next
-increment until their own implementation and examples land.
+Direct Go function binding and constructor/method APIs are implemented too;
+[the annotated example](../examples/annotated/main.go) generates their adapters
+from ordinary Go declarations.
 
 ## 1. Import a function and call it
 
@@ -102,7 +103,7 @@ control.close()
 
 Installed wheels resolve their package-data binary without that configuration.
 
-## 4. Expose existing Go functions without boilerplate DTOs (next increment)
+## 4. Expose existing Go functions without boilerplate DTOs
 
 ```go
 func Greet(name string) string { return "Hello, " + name + "!" }
@@ -113,12 +114,12 @@ r.Main()
 ```
 
 Explicit parameter names are necessary: runtime Go reflection does not retain
-source parameter names. Supported signatures should include an optional leading
+source parameter names. Supported signatures include an optional leading
 context.Context, typed parameters, and either a value, value+error, error only,
 or no result. Generated Python functions return the corresponding scalar/model
 or None. Unsupported signatures fail during registration.
 
-## 5. Constructors and methods preserve Go object ownership (next increment)
+## 5. Constructors and methods preserve Go object ownership
 
 ```go
 type Options struct {
@@ -161,5 +162,5 @@ The bridge cannot make an arbitrary Go object thread-safe merely by exporting it
 - Test public examples, constructor failure, repeated event loops, nested scopes,
   concurrent default initialization, fork/spawn and clean wheel installs in CI.
 
-See [Hello World](HELLO_WORLD.md), [Go API proposal](GO_API.md),
+See [Hello World](HELLO_WORLD.md), [Go API](GO_API.md),
 [architecture](ARCHITECTURE.md) and [performance measurements](PERFORMANCE.md).
