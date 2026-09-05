@@ -1,48 +1,263 @@
 # gobridge
 
-Keep your library in Go. Generate a CLI and typed Python and TypeScript functions
-and classes, with the Go binary bundled inside a Python wheel or npm package.
-
-**Development preview:** no Go version tags, Python packages, or npm packages have been
-published. Build and use the examples from this checkout.
-
-## Ordinary Go functions become ordinary Python functions
+Write a Go library. Use it from Go, the CLI, Python, and TypeScript.
+Generated packages include the Go executable and start it when first needed.
+Your users import functions or create objects; Go owns the work and reusable state.
 
 ```go
 //gobridge:export
 func Greet(name string) string { return "Hello, " + name + "!" }
 ```
 
-The generated Python package exposes the matching function:
-
 ```python
 from annotated import greet
 
-print(greet(name="World"))  # Hello, World!
+message = await greet(name="World")  # "Hello, World!"
 ```
 
-Go callers import the library and call `Greet` directly. Python starts the
-bundled executable on its first call and reuses a private daemon. Importing
-starts no process; a packaged wheel needs no Go installation or executable path.
+**Development preview:** nothing is published yet. This is the single user guide;
+follow it until you have what you need. The async-first Python API and dev command
+below are the next documented increment on the draft PR.
 
-Constructors and instance methods preserve real Go state:
+1. [Try a function](#1-try-a-function)
+2. [Call from Python](#2-call-from-python)
+3. [Add options and state](#3-add-options-and-state)
+4. [Expose your Go library](#4-expose-your-go-library)
+5. [Develop without rebuilding by hand](#5-develop-without-rebuilding-by-hand)
+6. [Share state deliberately](#6-share-state-deliberately)
+7. [Use TypeScript](#7-use-typescript)
+8. [Ship a package](#8-ship-a-package)
+9. [Embed only the daemon in Cobra](#9-embed-only-the-daemon-in-cobra)
+10. [Tune behavior](#10-tune-behavior)
+
+## 1. Try a function
+
+Development requires Go 1.23+ and Python 3.10+. Clone this branch, then run:
+
+```sh
+git clone --branch feat/go-cli-python https://github.com/sambhav/gobridge.git
+cd gobridge
+python -m pip install -e ./python
+go generate ./examples/annotated
+go run ./examples/annotated/cmd/annotated greet --name World
+```
+
+The last command prints `"Hello, World!"`. Explore the CLI with `--help` or
+`welcome --help`. Operation help shows argument types, validation and constructor
+options. Calls print JSON to stdout; errors and logs go to stderr. JSON input
+also works: `greet --json '{"name":"World"}'`, or `--json -` to read stdin.
+
+## 2. Call from Python
+
+Build a local importable package into `build/annotated`:
+
+```sh
+go run ./cmd/gobridge dev --dir ./examples/annotated \
+  --command ./examples/annotated/cmd/annotated \
+  --python ./build/annotated --class Greeter --once
+```
+
+Create `build/app.py` so Python finds the package beside your script:
+
+```python
+import asyncio
+from annotated import greet
+
+async def main():
+    print(await greet(name="World"))
+
+asyncio.run(main())
+```
+
+Run `python build/app.py`. In an async application or notebook, use `await` in
+its existing event loop. Importing starts no process. Calls reuse one private Go
+daemon, and normal process exit cleans it up. A packaged wheel has the same import
+experience without requiring a Go toolchain.
+
+**Python is async by default.** Every operation is a real `async def` with typed,
+keyword-only arguments. Python yields while Go works, so calls can overlap:
+
+```python
+messages = await asyncio.gather(greet(name="Sam"), greet(name="Chhavi"))
+```
+
+For a synchronous script, import the generated `_sync` version:
+
+```python
+from annotated import greet_sync
+
+print(greet_sync(name="World"))
+```
+
+It calls the synchronous transport directly. It never creates or nests an event
+loop and rejects calls from an already-running loop before sending an operation.
+Both versions share the same default Go state. There is no `aio` namespace or
+function whose return type changes depending on its caller. Use
+[Python's normal runner](https://docs.python.org/3/library/asyncio-runner.html)
+when your whole application is async.
+
+## 3. Add options and state
+
+A Go constructor becomes a Python constructor. Each instance owns an independent
+Go object and daemon:
 
 ```python
 from annotated import Greeter
 
-with Greeter(prefix="Hey, ") as greeter:
-    print(greeter.welcome(name="Sam"))  # Hey, Sam
-    print(greeter.stats().calls)       # 1
-    greeter.reset()
-    assert greeter.stats().calls == 0
+async with Greeter(prefix="Hey, ") as greeter:
+    print(await greeter.welcome(name="Sam"))  # Hey, Sam
+    print((await greeter.stats()).calls)      # 1
+    await greeter.reset()
 ```
 
-`prefix` comes from the Go constructor's options struct. Each instance owns a
-separate daemon and Go object. Methods have real signatures; model results are
-lightweight dataclasses. The runtimes have no mandatory Pydantic dependency.
-Async code can use `await aio.greet(...)` or an explicit `AsyncGreeter` instance.
+Results are normal scalars or frozen dataclasses. Void Go methods return `None`.
+There is no required Pydantic dependency. Keep a client alive for useful work;
+creating a process per call is expensive.
 
-TypeScript uses the same Go library through a native Node API:
+Synchronous applications use `SyncGreeter` and ordinary `with`:
+
+```python
+from annotated import SyncGreeter
+
+with SyncGreeter(prefix="Hey, ") as greeter:
+    print(greeter.welcome(name="Sam"))
+```
+
+The CLI supplies the same options before an operation:
+
+```sh
+go run ./examples/annotated/cmd/annotated \
+  --config '{"prefix":"Hey, "}' welcome --name Sam
+```
+
+## 4. Expose your Go library
+
+Keep your library in an importable Go package. Add `//gobridge:export` to functions
+or methods you want to expose and `//gobridge:constructor` to a constructor:
+
+```go
+type Options struct {
+    Prefix *string `json:"prefix,omitempty"`
+}
+
+//gobridge:constructor
+func NewGreeter(options Options) (*Greeter, error) {
+    // Apply your library's defaults or functional options here.
+    return newGreeter(options), nil
+}
+
+//gobridge:export
+func (g *Greeter) Welcome(ctx context.Context, name string) (string, error) {
+    return g.welcome(ctx, name)
+}
+```
+
+The bodies above stand in for your library's implementation; the
+[complete example](examples/annotated/greeter.go) includes a concurrent counter.
+Install the generator with `go install ./cmd/gobridge`, put Go's binary directory
+on `PATH`, and add `//go:generate gobridge generate --dir .` to your library.
+Run `go generate ./...` in your project.
+
+Generation creates `NewGobridge() (*gobridge.Registry, error)` in the same package.
+A [small command package](examples/annotated/cmd/annotated/main.go) calls it,
+checks the error, and runs `registry.Main()`. Native Go consumers import the
+library and call `Greet` or `NewGreeter` directly in their own process.
+
+| Declaration | Behavior |
+| --- | --- |
+| `//gobridge:export` | Expose a function/method using its source parameter names. |
+| `//gobridge:export custom_name` | Choose the operation's name. |
+| `//gobridge:constructor` | Initialize one object per daemon from a named options struct. |
+| Leading `context.Context` | Runtime supplies deadlines and cancellation. |
+| `T`, `(T, error)`, `error`, or no return | Typed result or exception; void becomes `None`/`undefined`. |
+
+Only annotated declarations are exposed. Names become snake_case in Python and
+camelCase in TypeScript. Constructors never run to generate bindings or help.
+Unsupported signatures and name collisions fail generation, including operations
+that would shadow generated `_sync` helpers. One constructor per registry is supported.
+The generator scans one package, respects its build constraints and never overwrites
+handwritten output. Use `gobridge generate --dir . --check` to check adapter drift.
+
+For direct registration:
+
+```go
+registry := gobridge.New()
+err := gobridge.Bind(registry, "greet", Greet, "name")
+```
+
+Check registration errors during setup. Reflection cannot recover source argument
+names, so `Bind` supplies them explicitly. `NewObject(registry, NewGreeter)` plus
+`object.Bind("welcome", (*Greeter).Welcome, "name")` registers an object directly.
+`Register` accepts typed request/response functions when you already have request
+structs and want a direct Go invocation path.
+
+## 5. Develop without rebuilding by hand
+
+Run the dev command without `--once` to watch source changes. Add your Python
+command after `--` to restart it after successful updates:
+
+```sh
+go run ./cmd/gobridge dev --dir ./examples/annotated \
+  --command ./examples/annotated/cmd/annotated \
+  --python ./build/annotated --class Greeter -- python build/app.py
+```
+
+The loop watches Go/Python source and Go module files beneath the current working
+directory. Go edits regenerate adapters, build the executable and regenerate
+Python bindings. Omit `--dir` for manual registration. Python-only edits restart
+the application without rebuilding Go. Output and dependency directories are ignored.
+
+Each successful build writes a binary under a content-derived filename, then
+atomically publishes bindings pointing to that exact binary. Old imports keep
+using their original binary; new imports get the new pair. Build failures leave
+the last working package and application intact. Handwritten packages are never
+overwritten. The application's `PYTHONPATH` includes the generated package's parent.
+
+The watcher restarts its application rather than mutating live imported modules
+or moving state between daemons. Stop it with Ctrl-C. Old binaries remain available
+for existing clients; remove generated output when all development clients have
+stopped. Packaged releases use fixed artifacts.
+
+## 6. Share state deliberately
+
+Most applications need only imported functions or explicit clients:
+
+| Usage | Go state |
+| --- | --- |
+| Imported async and sync functions | One lazy default per generated module and Python process. |
+| Threads/tasks sharing a client | Shared object and cache. |
+| Separate clients | Independent objects and daemons. |
+| Multiprocessing workers | Fresh daemons; parent pipes and Go state are never transferred. |
+| Session block | Temporary isolated state, restored on exit. |
+
+Set default options before the first call with `configure(prefix="Default: ")`.
+For temporary options on imported functions:
+
+```python
+from annotated import session, welcome
+
+async with session(prefix="Scoped: ") as greeter:
+    print(await welcome(name="Sam"))
+    print((await greeter.stats()).calls)
+```
+
+`session_sync(...)` uses `with` and yields `SyncGreeter`. Nested sessions restore
+the previous client. Concurrent async tasks stay isolated; child tasks inherit
+their session and should finish before it exits. Pass an explicit client to new
+threads when they need scoped state. Session options do not inherit defaults.
+
+`await shutdown()` closes and resets the module default; `shutdown_sync()` does
+the same in synchronous code. Do this before reconfiguring an existing default.
+Closing an explicit client never reopens it. Crashes and failed constructors are
+never silently retried or replayed.
+
+Pickles contain client configuration, not pipes, locks, pending work or Go state.
+Prefer `spawn` or `forkserver` with active threads. Fork hooks protect gobridge's
+resources; they cannot repair locks in unrelated libraries or native extensions.
+
+## 7. Use TypeScript
+
+Node 24+ packages expose Promise-returning functions, classes and typed options:
 
 ```ts
 import { greet, Greeter } from "gobridge-greeter-example";
@@ -50,86 +265,171 @@ import { greet, Greeter } from "gobridge-greeter-example";
 console.log(await greet({ name: "World" }));
 await using greeter = new Greeter({ prefix: "Hey, " });
 console.log(await greeter.welcome({ name: "Sam" }));
-console.log((await greeter.stats()).calls); // 1n: Go int64 maps to bigint
+console.log((await greeter.stats()).calls); // 1n: Go int64 is bigint
 ```
 
-Node 24+ clients return promises, use camelCase fields, support `AbortSignal`,
-and provide isolated async scopes. Build the local packages using the
-[TypeScript guide](docs/TYPESCRIPT.md#build-and-install-local-packages).
+Use `try/finally` with `await greeter.close()` without async disposal. Methods and
+nested fields use camelCase. Readonly interfaces describe plain JavaScript values;
+they do not deep-freeze results. Worker threads and child processes create their
+own clients. Pass configuration rather than live clients to workers.
 
-## Run it from a checkout
+Optional lifecycle functions have the same names as Python:
 
-Requires Go 1.23+ and Python 3.10+. From the repository root in a POSIX shell:
+```ts
+import { configure, session, shutdown, welcome } from "gobridge-greeter-example";
+
+configure({ prefix: "Default: " });
+await session({ prefix: "Scoped: " }, async greeter => {
+  console.log(await welcome({ name: "Sam" }));
+});
+await shutdown();
+```
+
+Sessions use AsyncLocalStorage; finish child tasks before returning. The runtime
+ships ESM JavaScript and declarations with no production dependencies. Browsers
+cannot spawn local processes and are outside this transport's scope.
+
+## 8. Ship a package
+
+Bundle cross-compiled executables with generated bindings. Consumers need only
+Python or Node. These reference recipes build Linux/macOS/Windows on amd64/arm64
+with `CGO_ENABLED=0`.
+
+For Python, from the repository root:
 
 ```sh
-go generate ./examples/annotated
+python -m pip install setuptools wheel
+python tools/build_wheels.py --go-package ./examples/annotated/cmd/annotated \
+  --package annotated --class Greeter --binary annotated \
+  --distribution gobridge-annotated-example
+python -m pip install --no-index --find-links dist gobridge-annotated-example
+```
+
+Pip chooses the matching wheel and local runtime dependency. Wheels contain typed
+Python source and a package-data binary. Linux wheels use generic `linux_*` tags
+for local/private distribution; public manylinux/musllinux certification is pending.
+
+For Node:
+
+```sh
+npm ci --ignore-scripts --prefix typescript
+python tools/build_npm.py
+npm install --offline --ignore-scripts \
+  ./dist/npm/gobridge-runtime-0.1.0.tgz \
+  ./dist/npm/gobridge-greeter-example-0.1.0.tgz
+```
+
+The npm package includes six binaries under `_bin/<platform>-<arch>`. It needs no
+compiler or install scripts. `--go-package`, `--package`, `--class`, and `--binary`
+adapt either recipe to your command. `--targets linux-amd64` shortens local builds.
+Libraries needing cgo require target C toolchains and a different build recipe.
+These commands create local artifacts; they never publish.
+
+For your own build system, generate bindings directly:
+
+```sh
 go build -o bin/annotated ./examples/annotated/cmd/annotated
-./bin/annotated generate-python --class Greeter --binary annotated > examples/annotated/annotated.py
-python -m pip install -e "./python[dev]"
-PYTHONPATH=examples/annotated python -c 'from annotated import control, greet; control.configure(command="./bin/annotated"); print(greet(name="World")); control.close()'
+bin/annotated generate-python --class Greeter --binary annotated > annotated.py
+bin/annotated generate-typescript --class Greeter --binary annotated > annotated.ts
 ```
 
-Development uses `control.configure(command=...)` for module functions or
-`Greeter("./bin/annotated", prefix="Hey, ")` for an explicit instance. Installed
-wheels locate their package-data executable automatically.
+Windows uses `bin/annotated.exe`. Commit generated source and check drift in CI.
+The runtime checks that the executable's schema matches its bindings.
 
-Use the same operations from the CLI:
+## 9. Embed only the daemon in Cobra
 
-```sh
-./bin/annotated greet --name World
-./bin/annotated welcome --help
-./bin/annotated --config '{"prefix":"Hey, "}' welcome --name Sam
+Your host can mount only `serve`, including beneath `host bridge serve`:
+
+```go
+bridge := &cobra.Command{Use: "bridge", Args: cobra.NoArgs,
+    RunE: func(cmd *cobra.Command, args []string) error { return cmd.Help() },
+}
+bridge.AddCommand(&cobra.Command{
+    Use: "serve", Args: cobra.NoArgs, SilenceUsage: true, SilenceErrors: true,
+    RunE: func(cmd *cobra.Command, args []string) error {
+        return registry.Serve(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), 64)
+    },
+})
+root.AddCommand(bridge)
 ```
 
-Help shows types, required/optional fields, documentation, validation limits,
-and constructor options. Operation stdout is JSON; errors go to stderr.
+`Serve` returns errors and never exits the host. Cobra owns parsing, hooks, help
+and other commands. Set protocol output to stdout and diagnostics to stderr;
+startup hooks must follow that rule too. Supply the context with `ExecuteContext`.
+Cancellation must also unblock the input reader: a host owning stdin can close
+it with `context.AfterFunc`. Borrowed streams retain their owner's shutdown
+mechanism. EOF cancels the session.
 
-Run the portable verification entrypoint, including on Windows:
+Select the host's command prefix with optional transport settings:
 
-```sh
-python tools/check.py
+```python
+from annotated import Greeter
+from gobridge import RuntimeOptions
+
+async with Greeter(prefix="Hey, ", _runtime=RuntimeOptions(
+    command=["./host", "bridge"],
+)) as greeter:
+    print(await greeter.welcome(name="Sam"))
 ```
 
-It builds the examples, verifies generated files, runs Go race tests and vet,
-and executes pytest against actual subprocesses. Windows manual commands use
-`bin/annotated.exe`. CI exercises Linux, macOS, Windows, supported Python
-versions, minimum Go, and clean platform-wheel installations.
+TypeScript uses `_runtime: { command: ["./host", "bridge"] }`. Both append `serve`
+without shell parsing. Generate bindings from the same registry at build time;
+the shipped host only needs the daemon command. The complete
+[Cobra example](examples/cobra/main.go) covers stream ownership and cancellation.
+It is a separate Go module so the core library has no Cobra dependency.
 
-## Ownership and performance
+## 10. Tune behavior
 
-| Usage | Go state |
-| --- | --- |
-| Module functions and `aio` | One lazy default per generated module per Python process |
-| Threads/tasks sharing a client | Shared daemon and state |
-| Separate client instances | Separate daemons and objects |
-| `control.scope(...)` | Isolated state; previous client restored on exit |
-| Multiprocessing workers | Fresh connections and state; parent's daemon stays owned by the parent |
+Supported values are strings, booleans, signed integers, finite floats, named
+structs, slices, string-keyed maps and pointers. Struct fields need explicit
+`json` names. Pointer inputs are optional/nullable; slices/maps are required but
+can be null. TypeScript omits absent `omitempty` pointer properties. Custom
+marshalers, recursive types, interfaces, variadic functions and multiple non-error
+results need adapters.
 
-Requests are multiplexed over anonymous stdio pipes, with bounded admission,
-cooperative cancellation, explicit shutdown, and schema checks. Crashes fail
-pending calls; operations are never automatically replayed. Prefer `spawn` or
-`forkserver` when other libraries have active threads.
+| Go type | Python | TypeScript |
+| --- | --- | --- |
+| `int8` / `int16` / `int32` | `int` within Go range | `number` within Go range |
+| `int` | `int` within target Go range | Safe integer `number` |
+| `int64` | Exact `int` | Exact `bigint`, even for small values |
+| `float32` / `float64` | Finite `float` | Finite `number` |
+| Named struct | Frozen dataclass | Readonly interface |
 
-Go owns the work and reusable state. The optional `Memo` cache provides bounded
-TTL/LRU storage and per-key request coalescing. Keep clients alive to amortize
-startup; IPC is intended for useful library operations. See the
-[measurements](docs/PERFORMANCE.md) and [lifecycle design](docs/ARCHITECTURE.md).
+Use Go `int64` when Node needs the full range. Unsafe Numbers fail explicitly.
+Bigints cross the existing JSON protocol as exact numeric literals; application
+`JSON.stringify` still needs its own bigint-aware serializer.
 
-## Guides
+Declare shared docs and validation beside fields:
 
-| You want to… | Start here |
-| --- | --- |
-| Import the library directly from Go | [Native Go usage](docs/GO_CONSUMER.md) |
-| Expose your existing functions and methods | [Source annotations](docs/SOURCE_GENERATION.md), [Go registration API](docs/GO_API.md) |
-| Use generated Python functions and classes | [Hello World](docs/HELLO_WORLD.md), [Python ownership and controls](docs/API_DESIGN.md) |
-| Use generated TypeScript functions and classes | [Node API and npm packaging](docs/TYPESCRIPT.md) |
-| Explore CLI flags and JSON configuration | [CLI guide](docs/CLI.md) |
-| Add the bridge to an existing CLI or Cobra app | [Embedding guide](docs/EMBEDDING.md) |
-| Declare shared docs and validation | [Field metadata](docs/FIELD_METADATA.md) |
-| Bundle a cross-compiled binary in Python | [Wheel packaging](docs/HELLO_WORLD.md#7-ship-the-binary-as-python-package-data) |
-| Follow remaining work | [Implementation plan](docs/PLAN.md) |
+```go
+type Request struct {
+    Name string `json:"name" doc:"Name to greet." validate:"minlen=1,maxlen=80"`
+    Age  *int   `json:"age,omitempty" validate:"min=0,max=120"`
+}
+```
 
-The wheel recipe targets Linux, macOS and Windows on amd64/arm64 with
-`CGO_ENABLED=0`. Libraries using cgo need target C toolchains. Linux wheels use
-`linux_*` tags for local/private distribution; public manylinux/musllinux
-compatibility and release automation remain planned work.
+Bounds are inclusive; string lengths count Unicode code points. Length rules also
+apply to slices/maps. Constraints validate non-null values without changing
+nullability. Invalid tags fail registration. Go validates inputs for every
+transport; Python metadata and TypeScript JSDoc expose the same rules. Defaults
+belong in the Go constructor. Native callers retain the library's own validation.
+
+Python calls accept `_timeout=2.0` in seconds. TypeScript uses a separate final
+`{ timeoutMs: 2000, signal: abort.signal }` argument. Canceling a Python async task
+propagates cancellation to Go. Handlers must honor their context. Typed errors
+cover invalid arguments, busy admission, timeout and daemon failure. Operations
+are never replayed after uncertain outcomes.
+
+Client-wide Python settings use `_runtime=RuntimeOptions(timeout=5,
+startup_timeout=5, max_pending=64)`. Node uses `timeoutMs`, `startupTimeoutMs`, and
+`maxPending`. Startup has a separate budget for handshake and initialization.
+Frames are limited to 1 MiB; pending work and write queues are bounded.
+
+Protect mutable Go receivers as you would for goroutines. The optional `Memo`
+cache supplies bounded TTL/LRU storage and coalesces loads per key. One waiter's
+cancellation leaves other waiters running; the last cancellation stops the loader
+context. Errors are not cached. Keep cached reference-containing values immutable
+or copy them. Reuse clients and batch useful work to amortize IPC.
+
+For test commands, protocol details, measurements and release work, see
+[Contributing](CONTRIBUTING.md).
