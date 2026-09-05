@@ -1,4 +1,5 @@
 """Build test daemons and generate bindings from their current schemas."""
+import importlib
 import os
 from pathlib import Path
 import subprocess
@@ -25,3 +26,6 @@ def generate_python(names=("greeter", "hello", "textkit")):
             str(binary), "generate-python", "--class", client_class, "--binary", name,
         ])
         (output / (name + ".py")).write_bytes(source)
+    # Python may have cached this sys.path entry as missing before generation.
+    # Refresh both missing-directory and existing-directory finders.
+    importlib.invalidate_caches()
