@@ -10,9 +10,20 @@ import (
 	"strings"
 )
 
-var pythonReserved = func() map[string]bool {
+var pythonKeywords = func() map[string]bool {
 	m := map[string]bool{}
-	for _, n := range strings.Fields("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield self _timeout call acall close aclose start _client command timeout max_pending expected_schema serve schema help generate_python") {
+	for _, n := range strings.Fields("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield self _timeout str int float bool list dict") {
+		m[n] = true
+	}
+	return m
+}()
+
+var pythonReserved = func() map[string]bool {
+	m := make(map[string]bool, len(pythonKeywords))
+	for n := range pythonKeywords {
+		m[n] = true
+	}
+	for _, n := range strings.Fields("call acall close aclose start lifecycle control aio RuntimeOptions DefaultControl _client command timeout max_pending expected_schema serve schema help generate_python") {
 		m[n] = true
 	}
 	return m
@@ -28,7 +39,7 @@ func fieldName(f reflect.StructField) (string, error) {
 			return "", fmt.Errorf("%s: only pointer omitempty is supported", f.Name)
 		}
 	}
-	if !identifier.MatchString(parts[0]) || pythonReserved[parts[0]] {
+	if !identifier.MatchString(parts[0]) || pythonKeywords[parts[0]] {
 		return "", fmt.Errorf("invalid or reserved field name %q", parts[0])
 	}
 	return parts[0], nil
@@ -124,6 +135,10 @@ func validateValue(raw json.RawMessage, t reflect.Type) error {
 			if err := validateValue(v, f.Type); err != nil {
 				return fmt.Errorf("%s: %w", n, err)
 			}
+			delete(fields, n)
+		}
+		for n := range fields {
+			return fmt.Errorf("unknown field %s", n)
 		}
 	case reflect.Slice:
 		var values []json.RawMessage
@@ -166,12 +181,16 @@ type Operation struct {
 	Output      Type   `json:"output"`
 }
 type Schema struct {
-	Protocol   int         `json:"protocol"`
-	Hash       string      `json:"schema_hash"`
-	Operations []Operation `json:"operations"`
+	Protocol    int         `json:"protocol"`
+	Hash        string      `json:"schema_hash"`
+	Operations  []Operation `json:"operations"`
+	Constructor *Type       `json:"constructor,omitempty"`
 }
 
 func describe(t reflect.Type) Type {
+	if t == nil {
+		return Type{Kind: "void"}
+	}
 	s := Type{Kind: t.Kind().String()}
 	switch t.Kind() {
 	case reflect.Pointer, reflect.Slice, reflect.Map:
@@ -191,9 +210,17 @@ func (r *Registry) Schema() Schema {
 	s := Schema{Protocol: 1, Operations: []Operation{}}
 	for _, n := range r.names() {
 		op := r.ops[n]
-		s.Operations = append(s.Operations, Operation{n, op.description, describe(op.in), describe(op.out)})
+		s.Operations = append(s.Operations, Operation{n, op.description, op.inputSchema(), describe(op.out)})
 	}
 	data, _ := json.Marshal(s.Operations)
+	if r.constructor != nil {
+		t := describe(r.constructor.config)
+		s.Constructor = &t
+		data, _ = json.Marshal(struct {
+			Operations  []Operation `json:"operations"`
+			Constructor *Type       `json:"constructor"`
+		}{s.Operations, s.Constructor})
+	}
 	s.Hash = fmt.Sprintf("%x", sha256.Sum256(data))
 	return s
 }

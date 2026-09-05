@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"sync"
 )
 
 // Error is a stable error code and a user-facing message, preserved in Python.
@@ -40,11 +41,26 @@ func wireError(err error) *Error {
 type operation struct {
 	name, description string
 	in, out           reflect.Type
+	inName            string
 	call              func(context.Context, json.RawMessage) (any, error)
 }
 
+func (op operation) inputSchema() Type {
+	t := describe(op.in)
+	if op.inName != "" {
+		t.Name = op.inName
+	}
+	return t
+}
+
 // Registry is immutable once serving starts. Registration is not concurrent.
-type Registry struct{ ops map[string]operation }
+type Registry struct {
+	ops         map[string]operation
+	constructor *constructor
+	initMu      sync.Mutex
+	initAttempt bool
+	initialized bool
+}
 
 func New() *Registry { return &Registry{ops: make(map[string]operation)} }
 
@@ -53,11 +69,11 @@ var identifier = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 // Register adapts an ordinary typed Go function. Both wire types must be named
 // structs using the supported JSON subset; schema errors fail at registration.
 func Register[I, O any](r *Registry, name, description string, fn func(context.Context, I) (O, error)) error {
-	if !identifier.MatchString(name) || pythonReserved[name] {
-		return fmt.Errorf("invalid or reserved operation name %q", name)
+	if err := r.checkName(name); err != nil {
+		return err
 	}
-	if _, exists := r.ops[name]; exists {
-		return fmt.Errorf("duplicate operation %q", name)
+	if fn == nil {
+		return fmt.Errorf("operation function must not be nil")
 	}
 	i, o := reflect.TypeOf((*I)(nil)).Elem(), reflect.TypeOf((*O)(nil)).Elem()
 	for _, t := range []reflect.Type{i, o} {
@@ -68,7 +84,7 @@ func Register[I, O any](r *Registry, name, description string, fn func(context.C
 			return err
 		}
 	}
-	r.ops[name] = operation{name, description, i, o, func(ctx context.Context, raw json.RawMessage) (any, error) {
+	return r.add(operation{name: name, description: description, in: i, out: o, call: func(ctx context.Context, raw json.RawMessage) (any, error) {
 		var v I
 		if len(raw) == 0 {
 			raw = []byte("{}")
@@ -85,7 +101,44 @@ func Register[I, O any](r *Registry, name, description string, fn func(context.C
 			return nil, Failure("invalid_argument", "expected a single JSON object")
 		}
 		return fn(ctx, v)
-	}}
+	}})
+}
+
+func (r *Registry) checkName(name string) error {
+	if r == nil {
+		return fmt.Errorf("registry must not be nil")
+	}
+	if !identifier.MatchString(name) || pythonReserved[name] {
+		return fmt.Errorf("invalid or reserved operation name %q", name)
+	}
+	if _, exists := r.ops[name]; exists {
+		return fmt.Errorf("duplicate operation %q", name)
+	}
+	return nil
+}
+
+func (r *Registry) add(op operation) error {
+	if err := r.checkName(op.name); err != nil {
+		return err
+	}
+	if r.ops == nil {
+		r.ops = make(map[string]operation)
+	}
+	r.ops[op.name] = op
+	return nil
+}
+
+// Describe supplies help text for an already registered function or method.
+func (r *Registry) Describe(name, description string) error {
+	if r == nil {
+		return fmt.Errorf("registry must not be nil")
+	}
+	op, ok := r.ops[name]
+	if !ok {
+		return fmt.Errorf("unknown operation %q", name)
+	}
+	op.description = description
+	r.ops[name] = op
 	return nil
 }
 func (r *Registry) names() []string {
@@ -109,6 +162,9 @@ func (r *Registry) Call(ctx context.Context, name string, params json.RawMessage
 	}
 	if err = ctx.Err(); err != nil {
 		return nil, err
+	}
+	if r.NeedsInit() {
+		return nil, Failure("failed_precondition", "initialize the service before calling operations")
 	}
 	result, err = op.call(ctx, params)
 	if err == nil {

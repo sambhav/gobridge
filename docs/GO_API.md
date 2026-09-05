@@ -1,7 +1,6 @@
 # Exposing Go libraries
 
-This document describes the next API increment. `Register` is available now;
-`Bind` and object constructors below are the implementation target for this PR.
+`Register`, `Bind`, and object constructors are implemented in this draft PR.
 See [API design](API_DESIGN.md) for the matching Python experience.
 
 ## Ordinary functions
@@ -37,6 +36,7 @@ with Calculator() as calculator:
 signatures are `T`, `(T, error)`, `error`, and no return values. A void function
 returns `None` in Python. Error codes created by `gobridge.Failure` survive the
 boundary. Panics become a generic internal error without leaking panic text.
+Add operation help text with `app.Describe("add", "Add two integers.")`.
 
 Wire values support strings, booleans, signed integers, floats, named structs,
 slices, string-keyed maps, and pointers to those types. Struct fields need
@@ -75,7 +75,7 @@ parent protocol connection or a snapshot of the parent's Go object state.
 
 ## Constructor options
 
-The object API will expose a Go constructor as Python initialization and bind
+The object API exposes a Go constructor as Python initialization and binds
 method expressions without running the constructor during schema generation:
 
 ```go
@@ -109,6 +109,19 @@ constructor may accept a leading context and may return an error. All options
 are applied before ordinary requests begin. Object methods receive the created
 receiver implicitly; a receiver or remote object ID never appears in their
 Python signatures.
+
+The CLI accepts the same configuration before the operation:
+
+```console
+counter --config '{"initial":10}' increment --amount 2
+12
+```
+
+Omitted configuration defaults to `{}`; required configuration fields must still
+be supplied. `schema` and `generate-python` inspect constructor types without
+running user initialization code. A failed constructor cannot be retried in the
+same daemon, because it might already have performed side effects; a fresh
+client gets a new process and a new initialization attempt.
 
 `(*Counter).Increment` is a method expression, not a method bound to an existing
 instance. This allows the bridge to discover the signature before initialization

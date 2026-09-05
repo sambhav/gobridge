@@ -19,6 +19,25 @@ func BenchmarkCall(b *testing.B) {
 		}
 	}
 }
+
+// Same wire payload and result as BenchmarkCall, with the plain-function adapter.
+func BenchmarkBindCall(b *testing.B) {
+	r := New()
+	if err := Bind(r, "echo", func(_ context.Context, text string, count int) (testOutput, error) {
+		return testOutput{text}, nil
+	}, "text", "count"); err != nil {
+		b.Fatal(err)
+	}
+	ctx := context.Background()
+	raw := []byte(`{"text":"hello","count":1}`)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := r.Call(ctx, "echo", raw); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
 func BenchmarkMemoHit(b *testing.B) {
 	m := NewMemo[string, int](10, time.Hour)
 	ctx := context.Background()

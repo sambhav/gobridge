@@ -13,8 +13,22 @@ import (
 // Run exposes the same registry as a CLI, schema command, generator, or daemon.
 // Operation flags use JSON literals, except strings which are passed as text.
 func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, stderr io.Writer) error {
+	var config json.RawMessage
+	if len(args) > 0 && args[0] == "--config" {
+		if len(args) < 3 {
+			return fmt.Errorf("--config requires a JSON object followed by an operation")
+		}
+		config = json.RawMessage(args[1])
+		args = args[2:]
+		if args[0] == "serve" || args[0] == "schema" || args[0] == "generate-python" || args[0] == "help" || args[0] == "--help" {
+			return fmt.Errorf("--config is supported for direct operation commands only")
+		}
+	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
 		fmt.Fprintln(out, "Commands: serve, schema, generate-python, <operation> [--json OBJECT | --field value ...]")
+		if r.constructor != nil {
+			fmt.Fprintln(out, "Constructor: --config OBJECT <operation> ... (omitted config defaults to {})")
+		}
 		for _, n := range r.names() {
 			fmt.Fprintf(out, "  %-20s %s\n", n, r.ops[n].description)
 		}
@@ -42,6 +56,9 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
+		if flags.NArg() != 0 {
+			return fmt.Errorf("unexpected arguments")
+		}
 		return r.GeneratePython(out, *class, *binary)
 	}
 	op, ok := r.ops[args[0]]
@@ -63,7 +80,7 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 		}
 	} else {
 		fields := map[string]Type{}
-		for _, f := range describe(op.in).Fields {
+		for _, f := range op.inputSchema().Fields {
 			fields[f.Name] = f.Type
 		}
 		values := map[string]any{}
@@ -79,6 +96,9 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 			if _, ok := values[n]; ok {
 				return fmt.Errorf("duplicate field %q", n)
 			}
+			for t.Kind == "ptr" {
+				t = *t.Elem
+			}
 			if t.Kind == "string" {
 				values[n] = args[j+1]
 			} else {
@@ -93,6 +113,16 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 	}
 	if len(raw) > MaxFrame {
 		return fmt.Errorf("input exceeds frame limit")
+	}
+	if r.constructor != nil {
+		if len(config) > MaxFrame {
+			return fmt.Errorf("constructor config exceeds frame limit")
+		}
+		if err := r.Initialize(ctx, config); err != nil {
+			return err
+		}
+	} else if config != nil {
+		return fmt.Errorf("--config requires a registered constructor")
 	}
 	v, err := r.Call(ctx, args[0], raw)
 	if err != nil {
