@@ -16,8 +16,8 @@ message = await greet(name="World")  # "Hello, World!"
 ```
 
 **Development preview:** nothing is published yet. This is the single user guide;
-follow it until you have what you need. The async-first Python API and dev command
-below are the next documented increment on the draft PR.
+follow it until you have what you need. The code below is available on the
+[draft PR](https://github.com/sambhav/gobridge/pull/1).
 
 1. [Try a function](#1-try-a-function)
 2. [Call from Python](#2-call-from-python)
