@@ -11,15 +11,19 @@ import (
 )
 
 type project struct {
-	Name               string `json:"name"`
-	Class              string `json:"class"`
-	Command            string `json:"command"`
-	Source             string `json:"source"`
-	Version            string `json:"version"`
-	PythonDistribution string `json:"python_distribution"`
-	NPMPackage         string `json:"npm_package"`
-	Repository         string `json:"repository"`
-	License            string `json:"license"`
+	PythonPackage      string            `json:"python_package,omitempty"`
+	TypeScriptPackage  string            `json:"typescript_package,omitempty"`
+	PythonRequires     []string          `json:"python_requires,omitempty"`
+	NPMDependencies    map[string]string `json:"npm_dependencies,omitempty"`
+	Name               string            `json:"name"`
+	Class              string            `json:"class"`
+	Command            string            `json:"command"`
+	Source             string            `json:"source"`
+	Version            string            `json:"version"`
+	PythonDistribution string            `json:"python_distribution"`
+	NPMPackage         string            `json:"npm_package"`
+	Repository         string            `json:"repository"`
+	License            string            `json:"license"`
 }
 
 func loadProject() (project, error) {
@@ -34,8 +38,12 @@ func loadProject() (project, error) {
 	defer file.Close()
 	dec := json.NewDecoder(file)
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&p); err != nil {
+	decoded := &p
+	if err := dec.Decode(&decoded); err != nil {
 		return p, fmt.Errorf("gobridge.json: %w", err)
+	}
+	if decoded == nil {
+		return p, fmt.Errorf("gobridge.json: expected a JSON object, got null")
 	}
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
@@ -69,10 +77,15 @@ func (p *project) validate() error {
 	if !regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`).MatchString(p.Class) {
 		return fmt.Errorf("class must be a capitalized identifier")
 	}
+	for _, reserved := range strings.Fields("Client AsyncClient RuntimeOptions DefaultControl Promise Record Uint8Array") {
+		if p.Class == reserved {
+			return fmt.Errorf("class %q conflicts with generated symbols", p.Class)
+		}
+	}
 	if p.Command == "" {
 		return fmt.Errorf("command must name a Go command package")
 	}
-	if !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(p.Version) {
+	if !regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`).MatchString(p.Version) {
 		return fmt.Errorf("version must have the form 1.2.3")
 	}
 	return nil

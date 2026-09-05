@@ -27,7 +27,27 @@ message = await greet(name="World")  # "Hello, World!"
 
 ## Quick start
 
-Start a new Go module and install the tool:
+Install the tool and scaffold a runnable project:
+
+```sh
+go install github.com/sambhav/gobridge/cmd/gobridge@latest
+gobridge init --dir greeter --module example.com/greeter --name acme.greeter
+cd greeter
+gobridge generate --dir bridge
+go mod tidy
+gobridge dev -- python app.py
+# TypeScript: gobridge dev --typescript -- node app.mts
+```
+
+Use `--npm-package @acme/greeter` with `init` for an npm scope. Dotted Python
+names such as `acme.tools.greeter` create native namespace packages.
+[Packaging and development guide](docs/packaging.md) covers scaffolding,
+wrappers, assets, dependencies, and live reload.
+
+### Add gobridge manually
+
+For an existing library, the equivalent setup is below. Start a new Go module
+and install the tool:
 
 ```sh
 mkdir greeter
@@ -118,7 +138,8 @@ print(greet_sync(name="World"))
 
 ## Build and install packages
 
-From your Go project, build the formats you need:
+From your Go project, inspect the plan with `gobridge build --check`, then build
+the formats you need:
 
 ```sh
 gobridge build --python
@@ -128,7 +149,9 @@ gobridge build --python --typescript
 ```
 
 The command reads `gobridge.json`, generates bindings, cross-compiles Go, and
-bundles the executable and private runtime. Python wheels need only Python's
+bundles the executable and private runtime. Artifacts are staged and accompanied
+by a checksum manifest; use `--replace` to overwrite different same-version
+artifacts. Python wheels need only Python's
 standard library to build. TypeScript packaging also needs Node 24+ and npm.
 
 ```sh

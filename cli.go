@@ -294,7 +294,7 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 			for t.Kind == "ptr" {
 				t = *t.Elem
 			}
-			if t.Kind == "string" {
+			if t.Kind == "string" || t.Kind == "timestamp" || t.Kind == "bytes" {
 				values[n] = args[j+1]
 			} else {
 				var v json.RawMessage = []byte(args[j+1])

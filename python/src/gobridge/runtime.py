@@ -6,6 +6,7 @@ Python process, shared by all of that client's threads and asyncio callers.
 from __future__ import annotations
 
 import atexit
+import base64
 import asyncio
 import concurrent.futures as futures
 import dataclasses
@@ -113,6 +114,8 @@ def _error(data):
 
 
 def _json_default(value):
+    if isinstance(value, bytes):
+        return base64.b64encode(value).decode("ascii")
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return dataclasses.asdict(value)
     raise TypeError(f"Cannot encode {type(value).__name__}")
@@ -133,6 +136,8 @@ def decode(cls: type[T], value: typing.Any) -> T:
     """Reconstruct generated dataclasses, recursively including containers."""
     if value is None:
         return value
+    if cls is bytes:
+        return base64.b64decode(value, validate=True)
     origin, args = typing.get_origin(cls), typing.get_args(cls)
     if origin in (types.UnionType, typing.Union):
         return decode(next(t for t in args if t is not type(None)), value)

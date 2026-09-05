@@ -195,7 +195,8 @@ It is a separate Go module so the core library has no Cobra dependency.
 Supported values are strings, booleans, signed integers, finite floats, named
 structs, slices, string-keyed maps and pointers. Struct fields need explicit
 `json` names. Pointer inputs are optional/nullable; slices/maps are required but
-can be null. TypeScript omits absent `omitempty` pointer properties. Custom
+can be null. Bytes, timestamps, and durations have the explicit codecs described
+below. TypeScript omits absent `omitempty` pointer properties. Other custom
 marshalers, recursive types, interfaces, variadic functions and multiple non-error
 results need adapters.
 
@@ -245,3 +246,21 @@ or copy them. Reuse clients and batch useful work to amortize IPC.
 
 For test commands, protocol details, measurements and release work, see
 [Contributing](../CONTRIBUTING.md).
+
+
+### Bytes and time values
+
+| Go | Python | TypeScript | JSON wire value |
+|---|---|---|---|
+| `[]byte` | `bytes \| None` | `Uint8Array \| null` | Base64 string or null |
+| `time.Time` | `str` | `string` | RFC 3339 timestamp with timezone |
+| `time.Duration` | `int` | `bigint` | Signed 64-bit nanoseconds |
+
+Empty bytes and null bytes remain distinct. Timestamp strings preserve Go's
+nanosecond precision and numeric timezone offset; they are not automatically
+converted to Python `datetime` or JavaScript `Date`, which have lower precision.
+Go validates timestamp values. Monotonic clock readings and timezone location
+names are not carried over JSON. Durations use nanoseconds, never floating-point
+seconds. These codec kinds participate in the schema fingerprint.
+
+Other types with custom JSON or text marshalers still require explicit adapters.

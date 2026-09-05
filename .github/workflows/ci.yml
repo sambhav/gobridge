@@ -41,6 +41,30 @@ jobs:
       - run: npm ci --ignore-scripts
         working-directory: typescript
       - run: python tools/check_typescript.py
+  package-workflows:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: python tools/test_workflows.py
+      - run: python tools/test_dev_watch.py
   npm-packages:
     runs-on: ubuntu-latest
     timeout-minutes: 15

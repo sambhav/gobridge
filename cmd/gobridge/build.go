@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -28,6 +29,9 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 	python := flags.Bool("python", false, "build Python wheels (default if no language is selected)")
 	typescript := flags.Bool("typescript", false, "build local npm tarballs with bundled binaries")
 	output := flags.String("output", "dist", "artifact output directory")
+	check := flags.Bool("check", false, "validate and print the build plan as JSON without writing files")
+	dryRun := flags.Bool("dry-run", false, "alias for --check")
+	replace := flags.Bool("replace", false, "replace existing artifacts with different contents")
 	targets := flags.String("targets", "all", "all or comma-separated OS-architecture targets")
 	flags.StringVar(&p.Source, "dir", p.Source, "annotated library directory; omit for manual registration")
 	flags.StringVar(&p.Command, "command", p.Command, "Go executable package")
@@ -57,6 +61,13 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 	if p.NPMPackage == "" {
 		p.NPMPackage = p.distributionName()
 	}
+	plan, err := planBuild(ctx, p, *targets, *output, *python, *typescript)
+	if err != nil {
+		return err
+	}
+	if *check || *dryRun {
+		return json.NewEncoder(os.Stdout).Encode(plan)
+	}
 	if p.Source != "" {
 		if err := sourcegen.Generate(p.Source, "zz_gobridge.gen.go"); err != nil {
 			return err
@@ -75,7 +86,7 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	assets := []string{"LICENSE"}
+	assets := []string{"LICENSE", "tools/package_customization.py"}
 	if *python {
 		assets = append(assets, "python/pyproject.toml", "python/src", "tools/build_wheels.py", "tools/packaging_common.py")
 	}
@@ -101,6 +112,7 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		command.Stderr = log
 		return command.Run()
 	}
+	artifacts := filepath.Join(stage, "artifacts")
 	common := []string{"--project", root, "--go-package", p.Command, "--class", p.Class, "--binary", p.binaryName(), "--version", p.Version, "--repository", p.Repository, "--license", p.License}
 	targetArgs := []string{}
 	if *targets != "all" {
@@ -109,7 +121,7 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 	}
 	if *python {
 		argv := append([]string{filepath.Join(stage, "tools/build_wheels.py")}, common...)
-		argv = append(argv, "--package", p.Name, "--distribution", p.PythonDistribution, "--output", absolute(*output))
+		argv = append(argv, "--package", p.Name, "--distribution", p.PythonDistribution, "--output", artifacts)
 		argv = append(argv, targetArgs...)
 		if err := execute(interpreter, argv...); err != nil {
 			return fmt.Errorf("wheel build: %w", err)
@@ -129,11 +141,14 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 			return fmt.Errorf("Node 24+ and npm are required for TypeScript packaging: %w", err)
 		}
 		argv := append([]string{filepath.Join(stage, "tools/build_npm.py")}, common...)
-		argv = append(argv, "--package", p.NPMPackage, "--output", filepath.Join(absolute(*output), "npm"))
+		argv = append(argv, "--package", p.NPMPackage, "--output", filepath.Join(artifacts, "npm"))
 		argv = append(argv, targetArgs...)
 		if err := execute(interpreter, argv...); err != nil {
 			return fmt.Errorf("npm package build: %w", err)
 		}
+	}
+	if err := publishArtifacts(artifacts, absolute(*output), plan, *replace); err != nil {
+		return err
 	}
 	fmt.Fprintln(log, "Packages built in", absolute(*output), "(nothing published)")
 	return nil

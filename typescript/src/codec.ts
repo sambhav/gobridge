@@ -60,10 +60,23 @@ function transform(type: WireType, value: unknown, input: boolean, path: string)
   }
   if ((type.kind === "slice" || type.kind === "map") && value === null) return null;
   switch (type.kind) {
+    case "bytes":
+      if (value === null) return null;
+      if (input) {
+        if (!(value instanceof Uint8Array)) return fail("expected Uint8Array or null");
+        return Buffer.from(value).toString("base64");
+      }
+      if (typeof value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) return fail("expected base64 string");
+      return new Uint8Array(Buffer.from(value, "base64"));
+    case "timestamp":
+      // Keep RFC 3339 text intact: Date would discard sub-millisecond precision.
+      if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return fail("expected RFC 3339 timestamp with timezone");
+      return value;
     case "string":
       return typeof value === "string" ? value : fail("expected a string");
     case "bool":
       return typeof value === "boolean" ? value : fail("expected a boolean");
+    case "duration":
     case "int64": {
       // Go emits int64 as decimal integer tokens. Safe parsed numbers can be
       // converted exactly; unsafe tokens were already preserved by parseWire.

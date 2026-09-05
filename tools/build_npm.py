@@ -4,6 +4,7 @@ The example tarball includes binaries for six Node platform/architecture pairs.
 Use --targets to shorten a local build. This script never publishes packages.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+
+from package_customization import copy_package, settings
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "typescript"
@@ -56,7 +59,11 @@ def main():
     parser.add_argument("--version", help="Application package version")
     parser.add_argument("--repository", default="", help="Application source repository URL")
     parser.add_argument("--license", default="", help="Application license identifier")
+    parser.add_argument("--dev-output", type=Path, help="publish an immutable local development revision")
+    parser.add_argument("--host-binary", type=Path, help="reuse a host executable in development mode")
     args = parser.parse_args()
+    if args.host_binary and not args.dev_output:
+        parser.error("--host-binary requires --dev-output")
     project = args.project.resolve()
     if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", args.client_class):
         parser.error("--class must be a capitalized class identifier")
@@ -70,7 +77,8 @@ def main():
     if not compiler.is_file():
         parser.error("install compiler dependencies first: npm ci --ignore-scripts --prefix typescript")
     output = args.output.resolve()
-    output.mkdir(parents=True, exist_ok=True)
+    if not args.dev_output:
+        output.mkdir(parents=True, exist_ok=True)
     runtime_manifest = json.loads((RUNTIME / "package.json").read_text())
     runtime_version = runtime_manifest["version"]
     version = args.version or runtime_version
@@ -79,7 +87,11 @@ def main():
         host = temporary / (args.binary + (".exe" if os.name == "nt" else ""))
         host_env = {key: value for key, value in os.environ.items() if key not in {"GOOS", "GOARCH"}}
         host_env["CGO_ENABLED"] = "0"
-        subprocess.run(["go", "build", "-o", str(host), args.go_package], cwd=project, env=host_env, check=True)
+        if args.host_binary:
+            shutil.copyfile(args.host_binary, host)
+            host.chmod(0o755)
+        else:
+            subprocess.run(["go", "build", "-o", str(host), args.go_package], cwd=project, env=host_env, check=True)
         bindings = subprocess.check_output([
             str(host), "generate-typescript", "--class", args.client_class, "--binary", args.binary,
         ])
@@ -87,7 +99,11 @@ def main():
         source = stage / "src"
         source.mkdir(parents=True)
         shutil.copytree(RUNTIME / "src", source / "_gobridge")
-        (source / "index.ts").write_bytes(bindings.replace(b'from "gobridge-runtime"', b'from "./_gobridge/index.js"'))
+        custom = copy_package(project, "typescript", source)
+        generated = "generated.ts" if custom else "index.ts"
+        (source / generated).write_bytes(bindings.replace(b'from "gobridge-runtime"', b'from "./_gobridge/index.js"'))
+        if custom and not (source / "index.ts").exists():
+            (source / "index.ts").write_text('export * from "./generated.js";\n')
         manifest = {
             "name": args.package,
             "version": version,
@@ -100,9 +116,16 @@ def main():
             "license": args.license or "UNLICENSED",
             "engines": {"node": ">=24"},
         }
+        dependencies = settings(project).get("npm_dependencies", {})
+        if dependencies:
+            manifest["dependencies"] = dependencies
+        if custom:
+            manifest["files"] = ["**/*", "!src", "!compiled", "!tsconfig.json"]
         if args.repository:
             manifest["repository"] = {"type": "git", "url": args.repository}
         (stage / "package.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        if dependencies:
+            npm("install", "--ignore-scripts", "--package-lock=false", "--no-audit", "--no-fund", cwd=stage)
         if (project / "LICENSE").is_file():
             shutil.copyfile(project / "LICENSE", stage / "LICENSE")
         (stage / "README.md").write_text(
@@ -111,6 +134,8 @@ def main():
             "an operation directly to use the lazy default client.\n\n"
             "Requires Node.js 24 or newer. No Go toolchain is needed by consumers.\n"
         )
+        if (project / "README.md").is_file():
+            shutil.copyfile(project / "README.md", stage / "README.md")
         config = {
             "compilerOptions": {
                 "target": "ES2022", "lib": ["ESNext"],
@@ -123,9 +148,15 @@ def main():
         }
         (stage / "tsconfig.json").write_text(json.dumps(config, indent=2) + "\n")
         subprocess.run(["node", str(compiler), "-p", str(stage / "tsconfig.json")], cwd=stage, check=True)
-        for filename in ("index.js", "index.d.ts"):
-            shutil.copyfile(stage / "compiled" / filename, stage / filename)
-        shutil.copytree(stage / "compiled" / "_gobridge", stage / "_gobridge")
+        shutil.copytree(stage / "compiled", stage, dirs_exist_ok=True)
+        if custom:
+            for asset in source.rglob("*"):
+                if asset.is_file() and asset.suffix != ".ts":
+                    destination = stage / asset.relative_to(source)
+                    if destination.exists():
+                        raise ValueError(f"package asset collides with generated output: {destination.name}")
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(asset, destination)
         shutil.copyfile(ROOT / "LICENSE", stage / "_gobridge" / "LICENSE")
         for target in args.targets:
             goos, goarch, node_target = TARGETS[target]
@@ -133,10 +164,43 @@ def main():
             binary_dir.mkdir(parents=True)
             binary = binary_dir / (args.binary + (".exe" if goos == "windows" else ""))
             env = dict(os.environ, GOOS=goos, GOARCH=goarch, CGO_ENABLED="0")
-            subprocess.run(["go", "build", "-trimpath", "-o", str(binary), args.go_package], cwd=project, env=env, check=True)
+            if args.host_binary:
+                shutil.copyfile(host, binary)
+            else:
+                subprocess.run(["go", "build", "-trimpath", "-o", str(binary), args.go_package], cwd=project, env=env, check=True)
             binary.chmod(0o755)
             print("Built", node_target, flush=True)
-        pack(stage, output)
+        if args.dev_output:
+            destination = args.dev_output.resolve()
+            shutil.rmtree(stage / "node_modules", ignore_errors=True)
+            shutil.rmtree(stage / "src")
+            shutil.rmtree(stage / "compiled")
+            (stage / "tsconfig.json").unlink()
+            digest = hashlib.sha256()
+            for path in sorted(stage.rglob("*")):
+                if path.is_file():
+                    digest.update(path.relative_to(stage).as_posix().encode() + b"\0")
+                    digest.update(path.read_bytes())
+            revision = "rev-" + digest.hexdigest()[:24]
+            target = destination / revision
+            if not target.exists():
+                with tempfile.TemporaryDirectory(prefix=".revision-", dir=destination) as temporary_revision:
+                    staged = Path(temporary_revision) / revision
+                    shutil.copytree(stage, staged)
+                    os.replace(staged, target)
+            manifest["main"] = f"./{revision}/index.js"
+            manifest["types"] = f"./{revision}/index.d.ts"
+            manifest["exports"] = {".": {"types": manifest["types"], "import": manifest["main"]}}
+            fd, name = tempfile.mkstemp(prefix=".manifest-", dir=destination)
+            try:
+                with os.fdopen(fd, "w") as file:
+                    json.dump(manifest, file, indent=2)
+                os.replace(name, destination / "package.json")
+            finally:
+                if os.path.exists(name): os.unlink(name)
+            print("Updated", destination, "with", revision, flush=True)
+        else:
+            pack(stage, output)
 
 
 if __name__ == "__main__":
