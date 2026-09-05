@@ -62,6 +62,12 @@ func tsType(t Type) string {
 		return "readonly " + elem + "[] | null"
 	case "map":
 		return "Record<string, " + tsType(*t.Elem) + "> | null"
+	case "bytes":
+		return "Uint8Array | null"
+	case "timestamp":
+		return "string"
+	case "duration":
+		return "bigint"
 	case "string":
 		return "string"
 	case "bool":
@@ -139,7 +145,7 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string) error {
 	if !regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(binary) {
 		return fmt.Errorf("binary must be a filename stem")
 	}
-	reserved := map[string]bool{"schema": true, "configure": true, "session": true, "shutdown": true, "Promise": true, "Record": true}
+	reserved := map[string]bool{"schema": true, "configure": true, "session": true, "shutdown": true, "Promise": true, "Record": true, "Uint8Array": true}
 	if reserved[class] {
 		return fmt.Errorf("class %s conflicts with generated TypeScript symbols", class)
 	}

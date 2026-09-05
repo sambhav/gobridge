@@ -265,3 +265,138 @@ the scoped package public. See npm's
 
 These commands publish your application. `gobridge build` itself never publishes,
 and gobridge's release workflow does not publish downstream authors' packages.
+
+## Scaffold a project
+
+```sh
+gobridge init --dir greeter --module example.com/greeter \
+  --name acme.tools.greeter --npm-package @acme/greeter
+cd greeter
+gobridge generate --dir bridge
+go mod tidy
+gobridge dev -- python app.py
+```
+
+`init` writes an editable annotated Go library in `bridge/`, its command in
+`cmd/bridge/`, a manifest, and Python/TypeScript applications. An existing
+`go.mod` supplies the module path; a new module requires `--module`.
+`init --dry-run` prints the planned file contents. Existing files are never
+replaced. The generated module pins the installed CLI's version.
+
+For TypeScript, use `gobridge dev --typescript -- node app.mts`. Node 24+ runs
+this example directly. For IDE checking or a compiled application, use the
+TypeScript configuration earlier in this guide. Dev installs its own compiler
+in the generated package; your application's compiler remains yours to configure.
+
+## Inspect and publish local build output
+
+```sh
+gobridge build --python --typescript --targets linux-amd64 --check
+gobridge build --python --typescript --targets linux-amd64
+gobridge build --python --typescript --targets linux-amd64 --replace
+```
+
+`--check` (also `--dry-run`) prints a JSON plan, including resolved names,
+languages, targets, destination, and tool versions. It validates configuration
+before generating adapters or creating build output. Python-only builds do not
+require Node. Inspection checks the main package and toolchain; it does not
+promise that application code will compile.
+
+Builds finish all selected formats and targets in staging first. Publication
+replaces individual artifacts atomically and writes `gobridge-build.json` last.
+The completion manifest lists the artifacts from that invocation with SHA-256
+checksums and sizes. Other versions already in the directory are retained.
+Consumers of automated builds should use the manifest, rather than infer a
+complete build from a directory listing.
+
+Existing artifacts with different bytes cause an error unless `--replace` is
+explicit. Ordinary publication failures restore previous files. Concurrent
+builders cannot publish into the same directory. A forcibly terminated process
+may leave a `.gobridge-build-lock` and staging directory; remove them only after
+confirming no builder is running, then rebuild. There is no automatic registry
+publication.
+
+## Add wrappers, assets, and dependencies
+
+Add only the package customization fields you need:
+
+```json
+{
+  "name": "acme.tools.greeter",
+  "source": "./bridge",
+  "command": "./cmd/bridge",
+  "npm_package": "@acme/greeter",
+  "python_package": "python-package",
+  "typescript_package": "typescript-package",
+  "python_requires": ["typing-extensions>=4"],
+  "npm_dependencies": {"some-library": "^1.0.0"}
+}
+```
+
+Use actual dependencies required by your wrappers; neither example dependency
+is required by gobridge itself. Python requirements support package names,
+extras, and version comparisons. npm dependencies use ordinary package specs.
+Your consumers install these dependencies normally; dev does not install wrapper
+dependencies into your Python environment or application.
+
+The source directories must be inside the project. Their contents are copied
+into the Python leaf package or npm package, including data assets. Namespace
+parents remain empty PEP 420 namespaces. Symlinks, hidden files, and reserved
+runtime/generated paths are rejected; there are no build hooks.
+
+In a customized Python package, generated APIs live in `_bindings.py`. Create
+`python-package/__init__.py` to define your public API:
+
+```python
+from ._bindings import greet_sync
+
+def friendly(name: str) -> str:
+    return greet_sync(name=name)
+```
+
+Use `importlib.resources.files(__package__)` for packaged data. If you omit
+`__init__.py`, gobridge re-exports the generated API. Both dev and wheel builds
+support these wrappers; development packages keep complete immutable revisions.
+
+In a customized TypeScript package, generated APIs live in `generated.ts`.
+Create `typescript-package/index.ts`:
+
+```typescript
+export * from "./generated.js";
+import { greet } from "./generated.js";
+
+export async function friendly(name: string): Promise<string> {
+  return greet({ name });
+}
+```
+
+The build compiles your `.ts` files and emits declarations alongside JavaScript.
+If you omit `index.ts`, it re-exports the generated API. Read packaged assets
+relative to `import.meta.url`. The package exports its root entrypoint; additional
+public APIs should be re-exported there. The project's README and license are
+included in the package.
+
+## Development watching
+
+Python: `gobridge dev -- python app.py`.
+TypeScript: `gobridge dev --typescript -- node app.mts`.
+Use `--once` without an application to generate just one development revision.
+
+TypeScript packages live in `node_modules/<npm_package>`, including scope
+directories. Dev refuses to take over an existing installed or handwritten
+package. Remove that package deliberately before switching it to dev ownership.
+No npm tarball or repeated install is needed when source changes.
+
+Go source and `go:embed` asset additions, edits, and removals rebuild the package.
+Application `.py`, `.ts`, `.mts`, `.js`, `.mjs`, `.cts`, and `.cjs` edits restart
+the application without rebuilding Go. Wrapper package changes regenerate the
+package. Failed builds leave the last working package and application running.
+Old imported revisions keep their matching runtime and executable.
+
+Changing `gobridge.json` prints a restart-required message and pauses reloads;
+restart dev to validate and apply the new configuration. Generated sibling
+packages and common build/dependency directories are excluded. Watching is
+limited to the project directory: changes in external local `replace` modules
+require restarting dev. Invoke your own TypeScript compiler/watch runner in the
+application command if your application needs transpilation beyond Node's native
+TypeScript support.

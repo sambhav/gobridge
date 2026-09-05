@@ -11,15 +11,19 @@ import (
 )
 
 type project struct {
-	Name               string `json:"name"`
-	Class              string `json:"class"`
-	Command            string `json:"command"`
-	Source             string `json:"source"`
-	Version            string `json:"version"`
-	PythonDistribution string `json:"python_distribution"`
-	NPMPackage         string `json:"npm_package"`
-	Repository         string `json:"repository"`
-	License            string `json:"license"`
+	PythonPackage      string            `json:"python_package,omitempty"`
+	TypeScriptPackage  string            `json:"typescript_package,omitempty"`
+	PythonRequires     []string          `json:"python_requires,omitempty"`
+	NPMDependencies    map[string]string `json:"npm_dependencies,omitempty"`
+	Name               string            `json:"name"`
+	Class              string            `json:"class"`
+	Command            string            `json:"command"`
+	Source             string            `json:"source"`
+	Version            string            `json:"version"`
+	PythonDistribution string            `json:"python_distribution"`
+	NPMPackage         string            `json:"npm_package"`
+	Repository         string            `json:"repository"`
+	License            string            `json:"license"`
 }
 
 func loadProject() (project, error) {
@@ -68,6 +72,11 @@ func (p *project) validate() error {
 	}
 	if !regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`).MatchString(p.Class) {
 		return fmt.Errorf("class must be a capitalized identifier")
+	}
+	for _, reserved := range strings.Fields("Client AsyncClient RuntimeOptions DefaultControl Promise Record Uint8Array") {
+		if p.Class == reserved {
+			return fmt.Errorf("class %q conflicts with generated symbols", p.Class)
+		}
 	}
 	if p.Command == "" {
 		return fmt.Errorf("command must name a Go command package")

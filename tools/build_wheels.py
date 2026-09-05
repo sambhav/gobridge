@@ -18,6 +18,7 @@ import zipfile
 import subprocess
 import tempfile
 
+from package_customization import copy_package, python_requirements
 from packaging_common import python_version, validate_static_linux
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +52,7 @@ def write_wheel(stage, package, distribution, version, tag, output, repository, 
     headers = ["Metadata-Version: 2.1", f"Name: {distribution}", f"Version: {version}",
                f"Summary: Typed Python bindings for {package}", "Requires-Python: >=3.10",
                "Description-Content-Type: text/markdown"]
+    headers.extend("Requires-Dist: " + requirement for requirement in python_requirements(project))
     if repository: headers.append(f"Home-page: {repository}")
     if license_id: headers.append(f"License: {license_id}")
     (dist_info / "METADATA").write_text("\n".join(headers) + "\n\n" + description + "\n", encoding="utf-8")
@@ -61,24 +63,33 @@ def write_wheel(stage, package, distribution, version, tag, output, repository, 
     destination = output / f"{normalized}-{version}-py3-none-{tag}.whl"
     timestamp = time.gmtime(max(315532800, int(os.environ.get("SOURCE_DATE_EPOCH", "315532800"))))[:6]
     records = []
-    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as wheel:
-        def add(name, data, mode=0o644):
-            info = zipfile.ZipInfo(name, timestamp)
-            info.create_system = 3
-            info.external_attr = (0o100000 | mode) << 16
-            info.compress_type = zipfile.ZIP_DEFLATED
-            wheel.writestr(info, data)
-        for path in sorted(stage.rglob("*")):
-            if not path.is_file(): continue
-            name, data = path.relative_to(stage).as_posix(), path.read_bytes()
-            add(name, data, path.stat().st_mode & 0o777)
-            digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
-            records.append((name, "sha256=" + digest, str(len(data))))
-        record = dist_info.name + "/RECORD"
-        buffer = io.StringIO(newline="")
-        writer = csv.writer(buffer, lineterminator="\n")
-        writer.writerows([*records, (record, "", "")])
-        add(record, buffer.getvalue().encode())
+    fd, temporary = tempfile.mkstemp(prefix=".wheel-", dir=output)
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as wheel:
+            def add(name, data, mode=0o644):
+                info = zipfile.ZipInfo(name, timestamp)
+                info.create_system = 3
+                info.external_attr = (0o100000 | mode) << 16
+                info.compress_type = zipfile.ZIP_DEFLATED
+                wheel.writestr(info, data)
+            for path in sorted(stage.rglob("*")):
+                if not path.is_file(): continue
+                name, data = path.relative_to(stage).as_posix(), path.read_bytes()
+                add(name, data, path.stat().st_mode & 0o777)
+                digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+                records.append((name, "sha256=" + digest, str(len(data))))
+            record = dist_info.name + "/RECORD"
+            buffer = io.StringIO(newline="")
+            writer = csv.writer(buffer, lineterminator="\n")
+            writer.writerows([*records, (record, "", "")])
+            add(record, buffer.getvalue().encode())
+        with zipfile.ZipFile(temporary) as wheel:
+            if wheel.testzip() is not None:
+                raise ValueError("wheel integrity verification failed")
+        os.replace(temporary, destination)
+    finally:
+        if os.path.exists(temporary): os.unlink(temporary)
     return destination
 
 
@@ -130,7 +141,12 @@ def main():
             shutil.copytree(ROOT / "python/src/gobridge", private, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
             shutil.copyfile(ROOT / "LICENSE", private / "LICENSE")
             source = bindings.decode().replace("\nfrom gobridge", "\nfrom ._gobridge")
-            (package / "__init__.py").write_text(source, encoding="utf-8")
+            if copy_package(PROJECT, "python", package):
+                (package / "_bindings.py").write_text(source, encoding="utf-8")
+                if not (package / "__init__.py").exists():
+                    (package / "__init__.py").write_text("from ._bindings import *\n")
+            else:
+                (package / "__init__.py").write_text(source, encoding="utf-8")
             (package / "py.typed").write_text("")
             binary = binary_dir / (args.binary + (".exe" if goos == "windows" else ""))
             env = dict(os.environ, GOOS=goos, GOARCH=goarch, CGO_ENABLED="0")

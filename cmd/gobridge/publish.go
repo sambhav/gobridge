@@ -121,7 +121,11 @@ func publishArtifacts(source, output string, plan buildPlan, replace bool) error
 			if e = os.MkdirAll(filepath.Dir(old), 0755); e != nil {
 				return e
 			}
-			if e = os.Rename(dest, old); e != nil {
+			data, e := os.ReadFile(dest)
+			if e != nil {
+				return e
+			}
+			if e = os.WriteFile(old, data, 0644); e != nil {
 				return e
 			}
 			backed = append(backed, rel)
@@ -131,6 +135,9 @@ func publishArtifacts(source, output string, plan buildPlan, replace bool) error
 		return nil
 	}
 	if err := backup(manifestName); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(output, manifestName)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	for _, rel := range paths {

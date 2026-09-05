@@ -72,8 +72,8 @@ func runInit(args []string, log io.Writer) error {
 		return err
 	}
 	files["cmd/bridge/main.go"] = string(main)
-	files["app.py"] = fmt.Sprintf("from %s import %s\n\nwith %s() as client:\n    print(client.greet(\"World\"))\n", p.Name, p.Class, p.Class)
-	files["app.mts"] = fmt.Sprintf("import { %s } from %q;\n\nawait using client = new %s();\nconsole.log(await client.greet(\"World\"));\n", p.Class, p.NPMPackage, p.Class)
+	files["app.py"] = fmt.Sprintf("from %s import Sync%s\n\nwith Sync%s() as client:\n    print(client.greet(name=\"World\"))\n", p.Name, p.Class, p.Class)
+	files["app.mts"] = fmt.Sprintf("import { %s } from %q;\n\nawait using client = new %s();\nconsole.log(await client.greet({ name: \"World\" }));\n", p.Class, p.NPMPackage, p.Class)
 	// Check the whole file set before writing anything. Never adopt existing files.
 	for path := range files {
 		dest := filepath.Join(*dir, path)

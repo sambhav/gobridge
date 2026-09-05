@@ -7,14 +7,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
 var pythonKeywords = func() map[string]bool {
 	m := map[string]bool{}
-	for _, n := range strings.Fields("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield self _timeout str int float bool list dict") {
+	for _, n := range strings.Fields("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield self _timeout str int float bool list dict bytes") {
 		m[n] = true
 	}
 	return m
@@ -47,11 +49,17 @@ func fieldName(f reflect.StructField) (string, error) {
 	return parts[0], nil
 }
 func validateType(t reflect.Type, seen map[reflect.Type]bool) error {
+	if t == reflect.TypeOf(time.Time{}) || t == reflect.TypeOf([]byte(nil)) {
+		return nil
+	}
 	if seen[t] {
 		return fmt.Errorf("recursive type %s is not supported", t)
 	}
 	seen[t] = true
 	defer delete(seen, t)
+	if t.Kind() == reflect.Pointer {
+		return validateType(t.Elem(), seen)
+	}
 	marshal := reflect.TypeOf((*json.Marshaler)(nil)).Elem()
 	unmarshal := reflect.TypeOf((*json.Unmarshaler)(nil)).Elem()
 	textMarshal := reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
@@ -129,6 +137,27 @@ func validateNode(raw json.RawMessage, t reflect.Type, rules *fieldRules, path s
 	}
 	if string(raw) == "null" {
 		return validationAt(path, fmt.Errorf("null is not allowed for %s", t))
+	}
+	if t == reflect.TypeOf(time.Time{}) {
+		var text string
+		if err := json.Unmarshal(raw, &text); err != nil {
+			return validationAt(path, err)
+		}
+		if !regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$`).MatchString(text) {
+			return validationAt(path, fmt.Errorf("expected RFC 3339 timestamp with at most 9 fractional digits"))
+		}
+		var value time.Time
+		return validationAt(path, json.Unmarshal(raw, &value))
+	}
+	if t == reflect.TypeOf([]byte(nil)) {
+		if len(raw) == 0 || raw[0] != '"' {
+			return validationAt(path, fmt.Errorf("bytes must be a base64 string or null"))
+		}
+		var value []byte
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return validationAt(path, err)
+		}
+		return validationAt(path, rules.checkLength(len(value)))
 	}
 	switch t.Kind() {
 	case reflect.Struct:
@@ -225,6 +254,15 @@ type Schema struct {
 func describe(t reflect.Type) Type {
 	if t == nil {
 		return Type{Kind: "void"}
+	}
+	if t == reflect.TypeOf(time.Time{}) {
+		return Type{Kind: "timestamp"}
+	}
+	if t == reflect.TypeOf(time.Duration(0)) {
+		return Type{Kind: "duration"}
+	}
+	if t == reflect.TypeOf([]byte(nil)) {
+		return Type{Kind: "bytes"}
 	}
 	s := Type{Kind: t.Kind().String()}
 	switch t.Kind() {

@@ -72,7 +72,6 @@ func TestBindRejectsInvalidSignatures(t *testing.T) {
 		{"context_later", func(int, context.Context) {}, []string{"value", "context"}},
 		{"interface", func(any) {}, []string{"value"}},
 		{"unsigned", func(uint) {}, []string{"value"}},
-		{"bytes", func([]byte) {}, []string{"value"}},
 		{"map_keys", func(map[int]string) {}, []string{"value"}},
 		{"two_values", func() (int, string) { return 0, "" }, nil},
 		{"three_results", func() (int, int, error) { return 0, 0, nil }, nil},

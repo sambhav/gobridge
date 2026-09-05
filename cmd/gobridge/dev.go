@@ -12,7 +12,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,10 +26,11 @@ const devMarker = "gobridge development package v1\n"
 
 type devOptions struct {
 	project
-	output   string
-	app      []string
-	interval time.Duration
-	once     bool
+	output     string
+	app        []string
+	interval   time.Duration
+	once       bool
+	typescript bool
 }
 
 func runDev(ctx context.Context, args []string, log io.Writer) error {
@@ -42,6 +46,7 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 	flags.StringVar(&options.Name, "name", p.Name, "Python import path (dots allowed; binary uses underscores)")
 	flags.StringVar(&options.Class, "class", p.Class, "generated client class")
 	flags.StringVar(&options.output, "python", "", "generated Python package directory (default build/<package/path>)")
+	flags.BoolVar(&options.typescript, "typescript", false, "generate a local npm package and restart a Node application")
 	flags.DurationVar(&options.interval, "interval", 500*time.Millisecond, "source polling interval")
 	flags.BoolVar(&options.once, "once", false, "build one matching package and exit")
 	if err := flags.Parse(args); err != nil {
@@ -54,11 +59,26 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 	if err := options.validate(); err != nil {
 		return err
 	}
+	if err := validateCustomization(options.project, !options.typescript, options.typescript); err != nil {
+		return err
+	}
 	if options.interval <= 0 {
 		return fmt.Errorf("interval must be positive")
 	}
 	if options.once && len(options.app) > 0 {
 		return fmt.Errorf("--once does not run an application; omit --once for reload")
+	}
+	if options.typescript {
+		if options.output != "" {
+			return fmt.Errorf("--python and --typescript are mutually exclusive")
+		}
+		if options.NPMPackage == "" {
+			options.NPMPackage = options.distributionName()
+		}
+		if !validNPMName(options.NPMPackage) {
+			return fmt.Errorf("invalid npm package %q", options.NPMPackage)
+		}
+		options.output = filepath.Join("node_modules", filepath.FromSlash(options.NPMPackage))
 	}
 	if options.output == "" {
 		options.output = filepath.Join("build", options.packagePath())
@@ -66,7 +86,7 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 	options.output = absolute(options.output)
 	packageRoot := options.output
 	parts := strings.Split(options.Name, ".")
-	for i := len(parts) - 1; i >= 0; i-- {
+	for i := len(parts) - 1; !options.typescript && i >= 0; i-- {
 		if filepath.Base(packageRoot) != parts[i] {
 			return fmt.Errorf("--python must end in the import package path %q", options.packagePath())
 		}
@@ -85,7 +105,9 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 	if options.once {
 		return buildDev(ctx, options, log)
 	}
-	goHash, pyHash, err := sourceHashes(options.output)
+	manifest, _ := os.ReadFile("gobridge.json")
+	configurationChanged := false
+	goHash, pyHash, err := sourceHashes(options.output, options.PythonPackage, options.TypeScriptPackage)
 	if err != nil {
 		return err
 	}
@@ -125,7 +147,7 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 	if rebuild() {
 		restart()
 	}
-	fmt.Fprintln(log, "Watching Go and Python source; Ctrl-C stops development.")
+	fmt.Fprintln(log, "Watching Go, embedded assets, and application source; Ctrl-C stops development.")
 	ticker := time.NewTicker(options.interval)
 	defer ticker.Stop()
 	for {
@@ -134,7 +156,17 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 			return nil
 		case <-ticker.C:
 		}
-		nextGo, nextPy, err := sourceHashes(options.output)
+		nextManifest, _ := os.ReadFile("gobridge.json")
+		if string(nextManifest) != string(manifest) {
+			manifest = nextManifest
+			configurationChanged = true
+			fmt.Fprintln(log, "gobridge.json changed; restart gobridge dev to apply configuration. Keeping the last working application.")
+			continue
+		}
+		if configurationChanged {
+			continue
+		}
+		nextGo, nextPy, err := sourceHashes(options.output, options.PythonPackage, options.TypeScriptPackage)
 		if err != nil {
 			fmt.Fprintln(log, "Watch:", err)
 			continue
@@ -201,12 +233,18 @@ func buildDev(ctx context.Context, options devOptions, log io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if options.typescript {
+		return buildDevTypeScript(ctx, options, binary, log)
+	}
 	stem := options.binaryName() + "-" + hex.EncodeToString(hash.Sum(nil))[:24]
 	generate := exec.CommandContext(ctx, binary, "generate-python", "--class", options.Class, "--binary", stem)
 	generate.Stderr = log
 	bindings, err := generate.Output()
 	if err != nil {
 		return err
+	}
+	if options.PythonPackage != "" {
+		return buildDevPythonPackage(ctx, options, stage, binary, stem, suffix, bindings, log)
 	}
 	bindings, err = bundlePython(ctx, options.output, bindings, log)
 	if err != nil {
@@ -271,26 +309,43 @@ func hostGoEnv() []string {
 	return env
 }
 
-func sourceHashes(output string) (string, string, error) {
+func sourceHashes(output string, packages ...string) (string, string, error) {
 	goHash, pyHash := sha256.New(), sha256.New()
+	embedded := map[string]bool{}
 	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
+			if path != "." {
+				if marker, e := os.ReadFile(filepath.Join(path, ".gobridge-dev")); e == nil && string(marker) == devMarker {
+					return filepath.SkipDir
+				}
+			}
 			if path != "." && (strings.HasPrefix(entry.Name(), ".") || entry.Name() == "node_modules" || entry.Name() == "vendor" || entry.Name() == "__pycache__" || entry.Name() == "dist" || entry.Name() == "bin" || absolute(path) == output) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if entry.Name() == "zz_gobridge.gen.go" {
+		if entry.Name() == "zz_gobridge.gen.go" || entry.Name() == "gobridge.json" {
 			return nil
+		}
+		custom := false
+		for _, root := range packages {
+			if root != "" {
+				rel, e := filepath.Rel(absolute(root), absolute(path))
+				if e == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+					custom = true
+				}
+			}
 		}
 		var writer io.Writer
 		switch {
+		case custom:
+			writer = goHash
 		case strings.HasSuffix(path, ".go"), entry.Name() == "go.mod", entry.Name() == "go.sum", entry.Name() == "go.work":
 			writer = goHash
-		case strings.HasSuffix(path, ".py"):
+		case strings.HasSuffix(path, ".py"), strings.HasSuffix(path, ".ts"), strings.HasSuffix(path, ".mts"), strings.HasSuffix(path, ".js"), strings.HasSuffix(path, ".mjs"), strings.HasSuffix(path, ".cts"), strings.HasSuffix(path, ".cjs"):
 			writer = pyHash
 		default:
 			return nil
@@ -299,10 +354,66 @@ func sourceHashes(output string) (string, string, error) {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(writer, path)
+		if strings.HasSuffix(path, ".go") {
+			for _, line := range strings.Split(string(data), "\n") {
+				line = strings.TrimSpace(line)
+				if !strings.HasPrefix(line, "//go:embed ") && !strings.HasPrefix(line, "//go:embed\t") {
+					continue
+				}
+				for _, pattern := range regexp.MustCompile("`[^`]*`|\"(?:[^\"\\\\]|\\\\.)*\"|[^\\s]+").FindAllString(strings.TrimSpace(strings.TrimPrefix(line, "//go:embed")), -1) {
+					if strings.HasPrefix(pattern, "\"") || strings.HasPrefix(pattern, "`") {
+						decoded, e := strconv.Unquote(pattern)
+						if e != nil {
+							continue
+						}
+						pattern = decoded
+					}
+					all := strings.HasPrefix(pattern, "all:")
+					pattern = strings.TrimPrefix(pattern, "all:")
+					matches, _ := filepath.Glob(filepath.Join(filepath.Dir(path), filepath.FromSlash(pattern)))
+					for _, match := range matches {
+						_ = filepath.WalkDir(match, func(asset string, e fs.DirEntry, err error) error {
+							if err != nil {
+								return nil
+							}
+							if e.Type()&os.ModeSymlink != 0 {
+								return nil
+							}
+							if !all && asset != match && (strings.HasPrefix(e.Name(), ".") || strings.HasPrefix(e.Name(), "_")) {
+								if e.IsDir() {
+									return filepath.SkipDir
+								}
+								return nil
+							}
+							if !e.IsDir() {
+								embedded[asset] = true
+							}
+							return nil
+						})
+					}
+				}
+			}
+		}
+		fmt.Fprintf(writer, "%s\x00%d\x00", path, len(data))
 		_, err = writer.Write(data)
 		return err
 	})
+	if err == nil {
+		paths := make([]string, 0, len(embedded))
+		for path := range embedded {
+			paths = append(paths, path)
+		}
+		sort.Strings(paths)
+		for _, path := range paths {
+			data, e := os.ReadFile(path)
+			if e != nil {
+				err = e
+				break
+			}
+			fmt.Fprintf(goHash, "embed:%s\x00%d\x00", path, len(data))
+			goHash.Write(data)
+		}
+	}
 	return hex.EncodeToString(goHash.Sum(nil)), hex.EncodeToString(pyHash.Sum(nil)), err
 }
 

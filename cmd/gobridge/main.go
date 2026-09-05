@@ -37,10 +37,10 @@ func runContext(ctx context.Context, args []string, stderr io.Writer) error {
 		return nil
 	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(stderr, "       gobridge init [--module example.com/project] [--name acme.greeter]")
-		fmt.Fprintln(stderr, "Usage: gobridge generate [--dir .] [--output zz_gobridge.gen.go] [--check]")
-		fmt.Fprintln(stderr, "       gobridge dev [--once] [--python build/<name>] [-- python app.py]")
-		fmt.Fprintln(stderr, "       gobridge build [--python] [--typescript] [--output dist]")
+		fmt.Fprintln(stderr, "Usage: gobridge init [--module example.com/project] [--name acme.greeter]")
+		fmt.Fprintln(stderr, "       gobridge generate [--dir .] [--output zz_gobridge.gen.go] [--check]")
+		fmt.Fprintln(stderr, "       gobridge dev [--once] [--typescript | --python build/<name>] [-- python app.py]")
+		fmt.Fprintln(stderr, "       gobridge build [--python] [--typescript] [--check] [--replace] [--output dist]")
 		return nil
 	}
 	if args[0] == "init" {

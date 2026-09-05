@@ -86,7 +86,7 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	assets := []string{"LICENSE"}
+	assets := []string{"LICENSE", "tools/package_customization.py"}
 	if *python {
 		assets = append(assets, "python/pyproject.toml", "python/src", "tools/build_wheels.py", "tools/packaging_common.py")
 	}

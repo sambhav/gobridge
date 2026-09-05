@@ -22,6 +22,10 @@ func pyType(t Type) string {
 		return "list[" + pyType(*t.Elem) + "] | None"
 	case "map":
 		return "dict[str, " + pyType(*t.Elem) + "] | None"
+	case "bytes":
+		return "bytes | None"
+	case "timestamp":
+		return "str"
 	case "string":
 		return "str"
 	case "bool":
