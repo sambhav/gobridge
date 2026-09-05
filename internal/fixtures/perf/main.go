@@ -55,6 +55,15 @@ func main() {
 	if err := bridge.Register(r, "work", "Echo data and optionally perform sequential SHA-256 rounds.", work); err != nil {
 		panic(err)
 	}
+	// The benchmark explicitly provisions capacity for its highest load level.
+	// Production's default (64) is intentionally unchanged.
+	if len(os.Args) == 2 && os.Args[1] == "serve" {
+		if err := r.Serve(context.Background(), os.Stdin, os.Stdout, 128); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	r.Main()
 }
 

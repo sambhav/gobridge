@@ -4,12 +4,10 @@
 package gobridge
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"regexp"
 	"sort"
@@ -92,13 +90,11 @@ func Register[I, O any](r *Registry, name, description string, fn func(context.C
 		if err := validateValue(raw, i); err != nil {
 			return nil, Failure("invalid_argument", err.Error())
 		}
-		d := json.NewDecoder(bytes.NewReader(raw))
-		d.DisallowUnknownFields()
-		if err := d.Decode(&v); err != nil {
+		// validateValue already checks exact field names and required fields.
+		// Unmarshal retains numeric/type checks and rejects trailing JSON without
+		// allocating a streaming decoder and its input buffer for each call.
+		if err := json.Unmarshal(raw, &v); err != nil {
 			return nil, Failure("invalid_argument", err.Error())
-		}
-		if err := d.Decode(new(any)); err != io.EOF {
-			return nil, Failure("invalid_argument", "expected a single JSON object")
 		}
 		return fn(ctx, v)
 	}})

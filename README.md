@@ -25,6 +25,9 @@ message = await greet(name="World")  # "Hello, World!"
 [State and options](#add-state-and-options) · [API guide](docs/usage.md) ·
 [Contributing](CONTRIBUTING.md)
 
+[Performance benchmarks and lifecycle stress tests](docs/performance.md)
+compare native Go, Python, and TypeScript with reproducible workloads.
+
 ## Quick start
 
 Install the tool and scaffold a runnable project:

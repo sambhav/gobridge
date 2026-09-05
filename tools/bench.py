@@ -7,6 +7,7 @@ import platform
 import statistics
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = {"tiny": (0, 0, False), "nested": (0, 0, True),
@@ -39,7 +40,8 @@ def measure(command):
     peak_rss = peak_processes = None
     process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        for _ in range(2400):  # bounded: at most two minutes per scenario
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
             usage = process_tree(process.pid)
             if usage:
                 peak_rss = max(peak_rss or 0, usage[0])
@@ -78,7 +80,8 @@ def summarize(report, previous=None):
               'process-tree RSS are in the JSON report. RSS sampling is Linux-only, every 50 ms, and can '
               'miss short-lived peaks. A null metric means unavailable, not zero. The RSS sum includes '
               'shared pages once per process. These are host-specific results, not universal guarantees.']
-    if previous and (previous['environment'] != report['environment'] or previous['parameters'] != report['parameters']):
+    stable = lambda env: {k:v for k,v in env.items() if k not in ('commit','dirty','tree')}
+    if previous and (stable(previous['environment']) != stable(report['environment']) or previous['parameters'] != report['parameters']):
         lines += ['', '**Comparison warning:** environment, commit, or parameters differ. Inspect both JSON reports before attributing changes to code.']
     return '\n'.join(lines) + '\n'
 
@@ -106,7 +109,7 @@ def main():
         if 'typescript' in clients:
             # Reuse the same generated-binding/type-check path as integration CI.
             subprocess.run([sys.executable, str(ROOT/'tools/check_typescript.py')], cwd=ROOT, check=True, stdout=sys.stderr)
-    environment = dict(commit=command_text('git','rev-parse','HEAD'), dirty=bool(command_text('git','status','--porcelain')),
+    environment = dict(commit=command_text('git','rev-parse','HEAD'), tree=command_text('git','rev-parse','HEAD^{tree}'), dirty=bool(command_text('git','status','--porcelain')), daemon_max_concurrency=128,
                        go=command_text('go','version'), python=platform.python_version(), node=command_text('node','--version') if 'typescript' in clients else None,
                        platform=platform.platform(), cpu_count=os.cpu_count(), machine=platform.machine(),
                        gomaxprocs=os.environ.get('GOMAXPROCS'), cpu_quota=Path('/sys/fs/cgroup/cpu.max').read_text().strip() if Path('/sys/fs/cgroup/cpu.max').exists() else None)
