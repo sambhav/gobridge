@@ -15,7 +15,6 @@ import json
 import math
 import os
 import queue
-import select
 import shutil
 import subprocess
 import sys
@@ -260,7 +259,7 @@ class _Transport:
     def _enqueue(self, data):
         # Caller holds self.lock. Never overtake a queued or partially written
         # frame. Small Unix writes normally complete without a writer wakeup.
-        if self._direct_writes and self._queued_writes == 0:
+        if self._direct_writes and self._queued_writes == 0 and len(data) <= 4096:
             try:
                 written = os.write(self.proc.stdin.fileno(), data)
             except OSError:
@@ -313,16 +312,23 @@ class _Transport:
                 if data is None or self.failure:
                     return
                 view = memoryview(data)
-                while view:
-                    if self.failure:
-                        return
-                    n = self.proc.stdin.write(view)
-                    if n is None and self._direct_writes:
-                        select.select([], [self.proc.stdin], [], 0.5)
-                        continue
-                    if not n:
-                        raise BrokenPipeError("daemon stopped reading")
-                    view = view[n:]
+                # A queued frame keeps _queued_writes > 0, excluding direct
+                # caller writes. Let the dedicated writer block normally for
+                # large frames instead of adding readiness waits per pipe chunk.
+                if self._direct_writes:
+                    os.set_blocking(self.proc.stdin.fileno(), True)
+                try:
+                    while view:
+                        if self.failure:
+                            return
+                        n = self.proc.stdin.write(view)
+                        if not n:
+                            raise BrokenPipeError("daemon stopped reading")
+                        view = view[n:]
+                finally:
+                    if self._direct_writes:
+                        os.set_blocking(self.proc.stdin.fileno(), False)
+                # Restore nonblocking mode before allowing a caller fast path.
                 with self.lock:
                     self._queued_writes -= 1
         except (OSError, ValueError) as e:

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 	"time"
 )
@@ -62,6 +63,35 @@ func TestDirectResponseEncodingMatchesJSONEnvelope(t *testing.T) {
 		if !bytes.Equal(got, want) {
 			t.Fatalf("%s != %s", got, want)
 		}
+	}
+}
+
+func TestCompactHelloFitsWhenFullSchemaExceedsFrameLimit(t *testing.T) {
+	r, calls := newTestObject(t)
+	if err := r.Describe("add", strings.Repeat("x", MaxFrame)); err != nil {
+		t.Fatal(err)
+	}
+	full, err := r.hello(json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullData, err := (Response{ID: "1", Result: full}).MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact, err := r.hello(json.RawMessage(`{"compact":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compactData, err := (Response{ID: "2", Result: compact}).MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fullData) <= MaxFrame || len(compactData) > MaxFrame {
+		t.Fatal("unexpected handshake sizes", len(fullData), len(compactData))
+	}
+	if calls.Load() != 0 {
+		t.Fatal("hello initialized the object")
 	}
 }
 
