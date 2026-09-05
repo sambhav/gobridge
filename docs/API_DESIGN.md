@@ -5,7 +5,7 @@ The Python convenience increment adds generated module functions, `aio`, lazy
 process-local defaults, explicit clients, `RuntimeOptions`, and scoped controls.
 Their runnable example and integration tests live in [Hello World](HELLO_WORLD.md).
 Direct Go function binding and constructor/method APIs are implemented too;
-[the annotated example](../examples/annotated/main.go) generates their adapters
+[the annotated example](../examples/annotated/greeter.go) generates their adapters
 from ordinary Go declarations.
 
 ## 1. Import a function and call it

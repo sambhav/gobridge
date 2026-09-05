@@ -1,11 +1,11 @@
 # Source generation: expose Go code without handwritten bridge adapters
 
-**Design-first checkpoint:** this document precedes implementation of the
-annotation generator. `Bind` and object registration remain the lower-level
-building blocks; source generation should make those declarations unnecessary
-for the common case.
+The annotation generator exposes ordinary Go declarations through generated
+registration code. `Bind` and object registration remain the lower-level building
+blocks; source generation removes those declarations from handwritten code in
+the common case.
 
-## The intended Go experience
+## The Go experience
 
 ```go
 //go:generate gobridge generate --dir . --output zz_gobridge.gen.go

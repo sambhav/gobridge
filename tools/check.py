@@ -15,7 +15,10 @@ def main():
     for name, client_class in [("textkit", "TextKit"), ("hello", "Hello"), ("annotated", "Greeter")]:
         binary = ROOT / "bin" / (name + (".exe" if os.name == "nt" else ""))
         binary.parent.mkdir(exist_ok=True)
-        subprocess.run(["go", "build", "-o", str(binary), f"./examples/{name}"], check=True)
+        go_package = f"./examples/{name}"
+        if name == "annotated":
+            go_package += "/cmd/annotated"
+        subprocess.run(["go", "build", "-o", str(binary), go_package], check=True)
         generated = subprocess.check_output([
             str(binary), "generate-python", "--class", client_class, "--binary", name,
         ], text=True, encoding="utf-8")

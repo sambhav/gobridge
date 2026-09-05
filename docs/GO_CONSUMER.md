@@ -1,8 +1,7 @@
 # Use the same library directly from Go
 
-**Docs-first checkpoint:** the annotated example is being split into an importable
-`greeter` package and a small CLI entrypoint. Its Go and Python operation contracts
-stay the same.
+The annotated example contains an importable `greeter` package and a small CLI
+entrypoint. Its Go and Python APIs expose the same functions and instance methods.
 
 The library lives at `github.com/sambhav/gobridge/examples/annotated`, with package
 name `greeter`. A Go application imports that package and calls its exported

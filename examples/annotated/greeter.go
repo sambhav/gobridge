@@ -1,11 +1,10 @@
-// Annotated demonstrates ordinary Go declarations exposed without handwritten adapters.
-package main
+// Package greeter demonstrates an ordinary Go library with generated CLI and Python adapters.
+package greeter
 
 //go:generate go run ../../cmd/gobridge generate --dir . --output zz_gobridge.gen.go
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"sync/atomic"
 )
@@ -20,13 +19,13 @@ type Options struct {
 	Prefix *string `json:"prefix,omitempty"`
 }
 
-// Greeter owns state in one daemon; atomic fields support concurrent calls.
+// Greeter owns one instance's state; atomic fields support concurrent calls.
 type Greeter struct {
 	prefix string
 	calls  atomic.Int64
 }
 
-// NewGreeter applies defaults once when a Python client starts its daemon.
+// NewGreeter applies defaults once and returns an independent library instance.
 //
 //gobridge:constructor
 func NewGreeter(options Options) (*Greeter, error) {
@@ -65,12 +64,3 @@ func (g *Greeter) Statistics() Stats {
 //
 //gobridge:export
 func (g *Greeter) Reset() { g.calls.Store(0) }
-
-func main() {
-	r, err := NewGobridge()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	r.Main()
-}
