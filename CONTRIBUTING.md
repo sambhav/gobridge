@@ -16,7 +16,7 @@ python tools/check_typescript.py
 The first check runs Go race tests/vet, adapter/Python drift checks, Cobra tests
 and pytest with real daemons. The second compiles Node runtime/generated types,
 checks invalid type examples, and tests real Go binaries and malformed peers.
-After building packages, `python tools/test_wheel.py --example annotated` and
+After building packages, `python tools/test_wheel.py --example greeter` and
 `python tools/test_npm.py` verify clean installs.
 
 CI covers minimum Go 1.23; Python 3.10/3.12/3.14 and Node 24/26 on Linux, macOS

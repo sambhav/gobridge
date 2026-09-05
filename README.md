@@ -10,7 +10,7 @@ func Greet(name string) string { return "Hello, " + name + "!" }
 ```
 
 ```python
-from annotated import greet
+from greeter import greet
 
 message = await greet(name="World")  # "Hello, World!"
 ```
@@ -38,8 +38,8 @@ Development requires Go 1.23+ and Python 3.10+. Clone this branch, then run:
 git clone --branch feat/go-cli-python https://github.com/sambhav/gobridge.git
 cd gobridge
 python -m pip install -e ./python
-go generate ./examples/annotated
-go run ./examples/annotated/cmd/annotated greet --name World
+go generate ./examples/greeter
+go run ./examples/greeter/cmd/greeter greet --name World
 ```
 
 The last command prints `"Hello, World!"`. Explore the CLI with `--help` or
@@ -49,19 +49,17 @@ also works: `greet --json '{"name":"World"}'`, or `--json -` to read stdin.
 
 ## 2. Call from Python
 
-Build a local importable package into `build/annotated`:
+Build a local importable package into `build/greeter`:
 
 ```sh
-go run ./cmd/gobridge dev --dir ./examples/annotated \
-  --command ./examples/annotated/cmd/annotated \
-  --python ./build/annotated --class Greeter --once
+go run ./cmd/gobridge dev --once
 ```
 
 Create `build/app.py` so Python finds the package beside your script:
 
 ```python
 import asyncio
-from annotated import greet
+from greeter import greet
 
 async def main():
     print(await greet(name="World"))
@@ -84,7 +82,7 @@ messages = await asyncio.gather(greet(name="Sam"), greet(name="Chhavi"))
 For a synchronous script, import the generated `_sync` version:
 
 ```python
-from annotated import greet_sync
+from greeter import greet_sync
 
 print(greet_sync(name="World"))
 ```
@@ -102,7 +100,7 @@ A Go constructor becomes a Python constructor. Each instance owns an independent
 Go object and daemon:
 
 ```python
-from annotated import Greeter
+from greeter import Greeter
 
 async with Greeter(prefix="Hey, ") as greeter:
     print(await greeter.welcome(name="Sam"))  # Hey, Sam
@@ -117,7 +115,7 @@ creating a process per call is expensive.
 Synchronous applications use `SyncGreeter` and ordinary `with`:
 
 ```python
-from annotated import SyncGreeter
+from greeter import SyncGreeter
 
 with SyncGreeter(prefix="Hey, ") as greeter:
     print(greeter.welcome(name="Sam"))
@@ -126,7 +124,7 @@ with SyncGreeter(prefix="Hey, ") as greeter:
 The CLI supplies the same options before an operation:
 
 ```sh
-go run ./examples/annotated/cmd/annotated \
+go run ./examples/greeter/cmd/greeter \
   --config '{"prefix":"Hey, "}' welcome --name Sam
 ```
 
@@ -153,13 +151,13 @@ func (g *Greeter) Welcome(ctx context.Context, name string) (string, error) {
 ```
 
 The bodies above stand in for your library's implementation; the
-[complete example](examples/annotated/greeter.go) includes a concurrent counter.
+[complete example](examples/greeter/greeter.go) includes a concurrent counter.
 Install the generator with `go install ./cmd/gobridge`, put Go's binary directory
 on `PATH`, and add `//go:generate gobridge generate --dir .` to your library.
 Run `go generate ./...` in your project.
 
 Generation creates `NewGobridge() (*gobridge.Registry, error)` in the same package.
-A [small command package](examples/annotated/cmd/annotated/main.go) calls it,
+A [small command package](examples/greeter/cmd/greeter/main.go) calls it,
 checks the error, and runs `registry.Main()`. Native Go consumers import the
 library and call `Greet` or `NewGreeter` directly in their own process.
 
@@ -191,15 +189,30 @@ names, so `Bind` supplies them explicitly. `NewObject(registry, NewGreeter)` plu
 `Register` accepts typed request/response functions when you already have request
 structs and want a direct Go invocation path.
 
+Keep build settings in `gobridge.json` at your project's root:
+
+```json
+{
+  "name": "greeter",
+  "source": ".",
+  "command": "./cmd/greeter"
+}
+```
+
+`name` supplies the Python import and binary name; the client class defaults to
+`Greeter`. `source` selects the annotated library package; omit it for manual
+registration. `command` selects the Go executable. Optional `class`, `version`,
+`python_distribution`, and `npm_package` customize generated artifacts. This
+checkout includes a manifest pointing at its example, so the commands below work
+without extra flags. Installed authors use `gobridge` instead of `go run ./cmd/gobridge`.
+
 ## 5. Develop without rebuilding by hand
 
 Run the dev command without `--once` to watch source changes. Add your Python
 command after `--` to restart it after successful updates:
 
 ```sh
-go run ./cmd/gobridge dev --dir ./examples/annotated \
-  --command ./examples/annotated/cmd/annotated \
-  --python ./build/annotated --class Greeter -- python build/app.py
+go run ./cmd/gobridge dev -- python build/app.py
 ```
 
 The loop watches Go/Python source and Go module files beneath the current working
@@ -234,7 +247,7 @@ Set default options before the first call with `configure(prefix="Default: ")`.
 For temporary options on imported functions:
 
 ```python
-from annotated import session, welcome
+from greeter import session, welcome
 
 async with session(prefix="Scoped: ") as greeter:
     print(await welcome(name="Sam"))
@@ -295,45 +308,55 @@ Bundle cross-compiled executables with generated bindings. Consumers need only
 Python or Node. These reference recipes build Linux/macOS/Windows on amd64/arm64
 with `CGO_ENABLED=0`.
 
-For Python, from the repository root:
+Build wheels with one command:
 
 ```sh
 python -m pip install setuptools wheel
-python tools/build_wheels.py --go-package ./examples/annotated/cmd/annotated \
-  --package annotated --class Greeter --binary annotated \
-  --distribution gobridge-annotated-example
-python -m pip install --no-index --find-links dist gobridge-annotated-example
+go run ./cmd/gobridge build --python
+python -m pip install --no-index --find-links dist gobridge-greeter-example
 ```
 
-Pip chooses the matching wheel and local runtime dependency. Wheels contain typed
-Python source and a package-data binary. Linux wheels use generic `linux_*` tags
-for local/private distribution; public manylinux/musllinux certification is pending.
-
-For Node:
+Build npm packages, or both formats together:
 
 ```sh
-npm ci --ignore-scripts --prefix typescript
-python tools/build_npm.py
+go run ./cmd/gobridge build --typescript
+go run ./cmd/gobridge build --python --typescript
+```
+
+The builder reads `gobridge.json`, regenerates Go adapters, cross-compiles the
+command and generates bindings from its actual schema. It stages the matching
+runtime from the project's Go module version, so it also works outside this
+checkout without locating repository scripts. Wheels go to `dist/`; npm tarballs
+go to `dist/npm/`. `--output`, `--version`, and
+`--targets linux-amd64,darwin-arm64` override the defaults. All six targets are
+built by default; no language flag means Python.
+
+Python builds require Python 3.10+, setuptools and wheel. TypeScript builds also
+require Node 24+ and npm; the builder installs pinned compiler tools in temporary
+staging. Consumers need no compiler, Go toolchain or install script. Pip selects
+the matching wheel. An npm package contains its selected binaries under
+`_bin/<platform>-<arch>`:
+
+```sh
 npm install --offline --ignore-scripts \
   ./dist/npm/gobridge-runtime-0.1.0.tgz \
   ./dist/npm/gobridge-greeter-example-0.1.0.tgz
 ```
 
-The npm package includes six binaries under `_bin/<platform>-<arch>`. It needs no
-compiler or install scripts. `--go-package`, `--package`, `--class`, and `--binary`
-adapt either recipe to your command. `--targets linux-amd64` shortens local builds.
-Libraries needing cgo require target C toolchains and a different build recipe.
-These commands create local artifacts; they never publish.
+Artifacts are local until you explicitly publish them to your registry. Linux
+wheels currently use generic `linux_*` tags for local/private distribution;
+public manylinux/musllinux certification is pending. Libraries requiring cgo
+need target C toolchains and a different recipe.
 
 For your own build system, generate bindings directly:
 
 ```sh
-go build -o bin/annotated ./examples/annotated/cmd/annotated
-bin/annotated generate-python --class Greeter --binary annotated > annotated.py
-bin/annotated generate-typescript --class Greeter --binary annotated > annotated.ts
+go build -o bin/greeter ./examples/greeter/cmd/greeter
+bin/greeter generate-python --class Greeter --binary greeter > greeter.py
+bin/greeter generate-typescript --class Greeter --binary greeter > greeter.ts
 ```
 
-Windows uses `bin/annotated.exe`. Commit generated source and check drift in CI.
+Windows uses `bin/greeter.exe`. Commit generated source and check drift in CI.
 The runtime checks that the executable's schema matches its bindings.
 
 ## 9. Embed only the daemon in Cobra
@@ -363,7 +386,7 @@ mechanism. EOF cancels the session.
 Select the host's command prefix with optional transport settings:
 
 ```python
-from annotated import Greeter
+from greeter import Greeter
 from gobridge import RuntimeOptions
 
 async with Greeter(prefix="Hey, ", _runtime=RuntimeOptions(
