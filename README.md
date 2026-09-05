@@ -6,6 +6,10 @@ classes, backed by a private Go daemon. TypeScript bindings are planned.
 This is an initial implementation, not a released package. Neither the Go
 module nor the Python package has been tagged or published to a registry.
 
+Start with the [Hello World tutorial](docs/HELLO_WORLD.md): expose an ordinary
+Go function, call it from the CLI and Python, share a Go cache across concurrent
+calls, and package a cross-compiled binary inside a Python wheel.
+
 ## Python usage
 
 The example bindings are generated from Go types. Results are dataclasses,
