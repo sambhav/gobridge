@@ -100,60 +100,34 @@ Primary references: [Python multiprocessing](https://docs.python.org/3/library/m
 
 ## Releases from GitHub
 
-The release workflow uses [Release Please](https://github.com/googleapis/release-please-action)
-to maintain one version and changelog for the Go module, both `gobridge-runtime`
-packages, and `gobridge-greeter-example`. The `textkit` and `hello` fixtures stay CI
-artifacts; they are not published to registries.
+[Release Please](https://github.com/googleapis/release-please-action) maintains one
+version and changelog for the Go module, CLI and bundled runtimes. Generated
+packages carry their runtime privately; no gobridge runtime or example package
+is published to PyPI/npm. Authors may publish their own generated packages there.
 
-1. Use a squash-merge title such as `fix: ...` or `feat: ...`. Normal merges to
-   `main` create or refresh the release PR and its changelog. Before 1.0, breaking
-   changes (`feat!: ...`) bump the minor version and fixes bump the patch.
-2. Review and merge the release PR in GitHub. Automation creates `vX.Y.Z`, runs the
-   full CI matrix on that exact tag, and publishes tested artifacts. Normal merges
-   are accumulated; publishing happens when the release PR is merged.
-3. Find wheels, npm tarballs and SHA-256 checksums on the GitHub release. The
-   release notes link to the publishing workflow; a tag alone is not evidence
-   that registry uploads finished.
-4. If publishing failed, use **Actions → Release → Run workflow**, select `main`,
-   and enter the existing tag in `retry_tag`. This rebuilds and tests that exact
-   tag. Already-published files must match their recorded digest before a retry
-   can skip them. Never move a released tag or reuse a version for changed code.
-
-Release Please updates `version.txt`, Python/npm manifests, the npm lockfile and
-example settings together. CI rejects version drift and mismatched release tags.
-The author CLI reads the runtime version from the selected Go module's package
-metadata; application versions remain independent. No hard-coded runtime version
-is embedded in the wheel recipe.
-
-### One-time registry setup
-
-A maintainer needs PyPI and npm accounts with permission to publish these names.
-The registry lookups returned 404 for both names on both registries on 2026-09-05;
-that is not a reservation or a guarantee that a registry will accept the name.
-
-| Registry | Packages | Publisher settings |
-| --- | --- | --- |
-| PyPI | `gobridge-runtime`, `gobridge-greeter-example` | Owner `sambhav`, repository `gobridge`, workflow `release.yml`, environment `pypi` |
-| npm | `gobridge-runtime`, `gobridge-greeter-example` | Owner `sambhav`, repository `gobridge`, workflow `release.yml`, environment `npm`; allow direct `npm publish` |
-
-On [PyPI's publishing page](https://pypi.org/manage/account/publishing/), add a
-[pending publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
-for each new package. The first successful workflow upload creates it. No PyPI
-API token is required; pending publishers do not reserve package names.
-
-npm configures trusted publishers on existing packages. For first publication,
-create a short-lived npm token with permission to create/publish these packages,
-and save it as the GitHub **npm environment secret `NPM_TOKEN`**. After the first
-successful upload, configure the publisher in each package's npm settings with
-the table above, then remove that secret. Subsequent releases use OIDC. You can
-also bootstrap once from the release tarballs using an authenticated npm CLI.
-See [npm's current publisher requirements](https://docs.npmjs.com/trusted-publishers/).
+1. Squash-merge with a title such as `fix: ...` or `feat: ...`. Merges to `main`
+   create or refresh a release PR. Before 1.0, breaking changes (`feat!: ...`) bump
+   the minor version and fixes bump the patch.
+2. Review and merge the release PR in GitHub. Automation creates `vX.Y.Z`, runs
+   the full CI matrix on that exact tag, and publishes six CLI archives and their
+   SHA-256 checksums to GitHub Releases. Ordinary merges accumulate in the release
+   PR; merging that PR publishes the release.
+3. If a release job failed, use **Actions → Release → Run workflow**, select
+   `main`, and enter the existing tag in `retry_tag`. Automation tests that exact
+   source revision. Existing release assets must match before a retry skips them;
+   it never overwrites an asset or moves a published tag.
 
 In **Settings → Actions → General**, allow GitHub Actions to create pull requests.
 The workflow explicitly dispatches CI for bot-created release PRs, so no personal
-GitHub token is required. Environments `pypi` and `npm` hold publishing identities;
-restrict them to `main` as appropriate for your repository policy. All publishing
-uses GitHub-hosted runners. PR checks build artifacts but never publish them.
+GitHub token is required. It uses the repository's built-in token to create the
+release and upload assets. No PyPI/npm accounts, tokens or package registrations
+are needed to release gobridge.
 
-GitHub is the Go module host and release archive. PyPI and npm are the public
-language registries; there is no additional Go registry account to create.
+Release Please updates `version.txt`, development manifests, the npm lockfile and
+example settings together. CI rejects version drift and mismatched release tags.
+The Go module tag makes `go get` and `go install ...@latest` available through the
+normal Go toolchain. Archives also provide the CLI without building it locally.
+
+Tests build and clean-install the example wheels/npm tarballs on multiple hosts,
+but those artifacts remain CI fixtures. Linux wheel checks cover glibc and musl;
+release artifacts contain only the gobridge tool, license and documentation.
