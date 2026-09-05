@@ -11,6 +11,7 @@ def main():
     os.chdir(ROOT)
     subprocess.run(["go", "test", "-race", "./..."], check=True)
     subprocess.run(["go", "vet", "./..."], check=True)
+    subprocess.run(["go", "test", "-race", "./..."], cwd=ROOT / "examples/cobra", check=True)
     subprocess.run(["go", "run", "./cmd/gobridge", "generate", "--dir", "./examples/annotated", "--check"], check=True)
     for name, client_class in [("textkit", "TextKit"), ("hello", "Hello"), ("annotated", "Greeter")]:
         binary = ROOT / "bin" / (name + (".exe" if os.name == "nt" else ""))

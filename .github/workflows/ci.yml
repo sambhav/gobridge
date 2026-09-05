@@ -75,6 +75,8 @@ jobs:
           go-version: '1.23.x'
           cache: false
       - run: go test -race ./...
+      - run: go test -race ./...
+        working-directory: examples/cobra
   wheels:
     runs-on: ubuntu-latest
     timeout-minutes: 20

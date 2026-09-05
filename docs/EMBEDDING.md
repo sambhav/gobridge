@@ -1,7 +1,7 @@
 # Embed only the daemon in an existing Cobra CLI
 
-**Docs-first checkpoint:** `Registry.Serve` already supports direct embedding.
-The standalone Cobra example and its integration tests will follow this contract.
+`Registry.Serve` supports direct embedding. The standalone Cobra example and its
+integration tests demonstrate this contract with a real Cobra dependency.
 
 Mount a `serve` command in your existing command tree. Cobra owns command parsing,
 help, flags, hooks, and your other commands; the bridge handles the private stdio
@@ -53,6 +53,25 @@ To expose `host bridge serve`, mount the same daemon command beneath a Cobra
 command named `bridge`. The host's `version`, `status`, and other commands remain
 ordinary Cobra commands. Only `serve` needs to be mounted: exposing the bridge's
 operation CLI, `schema`, or `generate-python` commands is optional.
+
+```go
+bridge := &cobra.Command{
+    Use:           "bridge",
+    Short:         "Private library integration",
+    Args:          cobra.NoArgs,
+    SilenceUsage:  true,
+    SilenceErrors: true,
+    RunE: func(cmd *cobra.Command, args []string) error {
+        return cmd.Help()
+    },
+}
+addDaemon(bridge, registry)
+root.AddCommand(bridge)
+```
+
+Giving the group an argument check and a help action also makes an unmounted
+command such as `host bridge greet` return an error instead of silently showing
+the group's help.
 
 Point the generated Python client at the command prefix:
 
