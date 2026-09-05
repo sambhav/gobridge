@@ -72,7 +72,7 @@ func (p *project) validate() error {
 	if p.Command == "" {
 		return fmt.Errorf("command must name a Go command package")
 	}
-	if !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(p.Version) {
+	if !regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`).MatchString(p.Version) {
 		return fmt.Errorf("version must have the form 1.2.3")
 	}
 	return nil
