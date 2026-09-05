@@ -76,6 +76,43 @@ def main():
                         "--output", "app-only"], cwd=project, check=True)
         assert not list((project / "app-only").glob("gobridge_runtime*"))
         assert len(list((project / "app-only").glob("*.whl"))) == 1
+        # Separate distributions share native namespace parents, including after uninstall.
+        for leaf in ("greeter", "farewell"):
+            manifest = {"name": "acme.tools." + leaf, "source": ".", "command": "./cmd/greeter",
+                        "npm_package": "@acme/" + leaf}
+            (project / "gobridge.json").write_text(json.dumps(manifest))
+            languages = ["--python", "--typescript"] if leaf == "greeter" else ["--python"]
+            subprocess.run([str(cli), "build", *languages, "--targets", goos + "-" + goarch,
+                            "--output", "namespaced"], cwd=project, check=True)
+            wheel = next((project / "namespaced").glob("acme_tools_" + leaf + "-*.whl"))
+            with zipfile.ZipFile(wheel) as archive:
+                paths = archive.namelist()
+                assert "acme/__init__.py" not in paths and "acme/tools/__init__.py" not in paths
+                assert "acme/py.typed" not in paths and "acme/tools/py.typed" not in paths
+                assert f"acme/tools/{leaf}/py.typed" in paths
+                assert f"acme/tools/{leaf}/_gobridge/runtime.py" in paths
+                assert f"acme/tools/{leaf}/_bin/acme_tools_{leaf}" + (".exe" if goos == "windows" else "") in paths
+            subprocess.run([str(python), "-m", "pip", "install", "--no-index", str(wheel)], check=True)
+        clean_env = {k:v for k,v in os.environ.items() if k != "PYTHONPATH"}
+        subprocess.run([str(python), "-c", '''
+import asyncio, pickle
+import acme, acme.tools
+from acme.tools import greeter, farewell
+assert acme.__file__ is None and acme.tools.__file__ is None
+assert greeter.greet_sync(name="Sam") == "Hello, Sam!"
+assert asyncio.run(farewell.greet(name="Sam")) == "Hello, Sam!"
+with greeter.SyncGreeter(prefix="Hi, ") as client:
+    with pickle.loads(pickle.dumps(client)) as restored:
+        assert restored.welcome(name="Sam") == "Hi, Sam"
+greeter.shutdown_sync()
+farewell.shutdown_sync()
+'''], cwd=root, env=clean_env, check=True)
+        subprocess.run([str(python), "-m", "pip", "uninstall", "-y", "acme-tools-greeter"], check=True)
+        subprocess.run([str(python), "-c", 'from acme.tools.farewell import greet_sync; assert greet_sync(name="Sam") == "Hello, Sam!"'],
+                       cwd=root, env=clean_env, check=True)
+        subprocess.run([shutil.which("npm"), "install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund",
+                        str(project / "namespaced/npm/acme-greeter-0.1.0.tgz")], cwd=node, check=True)
+        subprocess.run(["node", "--input-type=module", "-e", 'import {greet} from "@acme/greeter"; if(await greet({name:"Sam"}) !== "Hello, Sam!") throw Error("bad greeting");'], cwd=node, check=True)
         print("External project: versioned wheels and npm packages build and install through the CLI")
 
 

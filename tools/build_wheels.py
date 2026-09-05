@@ -87,7 +87,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--targets", nargs="+", choices=TARGETS, default=list(TARGETS))
     parser.add_argument("--go-package", default="./examples/greeter/cmd/greeter", help="Go command package to build")
-    parser.add_argument("--package", default="greeter", help="Top-level Python import package")
+    parser.add_argument("--package", default="greeter", help="Python import package, optionally dotted (acme.greeter)")
     parser.add_argument("--class", dest="client_class", default="Greeter", help="Generated Python client class")
     parser.add_argument("--binary", default="greeter", help="Executable filename without .exe")
     parser.add_argument("--distribution", default="gobridge-greeter-example", help="Python wheel distribution name")
@@ -98,15 +98,16 @@ def main():
     parser.add_argument("--license", default="", help="Application license identifier")
     args = parser.parse_args()
     PROJECT = args.project.resolve()
-    if not args.package.isidentifier() or keyword.iskeyword(args.package):
-        parser.error("--package must be one Python package identifier")
+    parts = args.package.split(".")
+    if any(not re.fullmatch(r"[a-z][a-z0-9_]*", part) or keyword.iskeyword(part) for part in parts):
+        parser.error("--package must be dot-separated lowercase Python package identifiers")
     if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", args.client_class):
         parser.error("--class must be a capitalized Python class identifier")
     if not re.fullmatch(r"[A-Za-z0-9_-]+", args.binary):
         parser.error("--binary must be a filename stem using letters, digits, _ or -")
     if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?", args.distribution):
         parser.error("--distribution must be a Python distribution name")
-    if re.sub(r"[-_.]+", "-", args.distribution).lower() == "gobridge-runtime" or args.package == "gobridge":
+    if re.sub(r"[-_.]+", "-", args.distribution).lower() == "gobridge-runtime" or parts[0] == "gobridge":
         parser.error("application package must not shadow the gobridge runtime")
     runtime_version = python_version(ROOT)
     version = args.version or runtime_version
@@ -121,7 +122,8 @@ def main():
         for target in args.targets:
             goos, goarch, tag = TARGETS[target]
             stage = temp / target
-            package = stage / args.package
+            package = stage.joinpath(*parts)
+            # PEP 420 parents intentionally have no __init__.py or py.typed.
             binary_dir = package / "_bin"
             binary_dir.mkdir(parents=True)
             private = package / "_gobridge"

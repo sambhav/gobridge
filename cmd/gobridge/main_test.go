@@ -33,3 +33,25 @@ func TestGenerateAndCheckCommands(t *testing.T) {
 		t.Fatalf("unknown command: %v", err)
 	}
 }
+
+func TestDottedPackageNames(t *testing.T) {
+	for _, name := range []string{"greeter", "acme.greeter", "acme.tools.greeter"} {
+		p := project{Name: name, Command: ".", Version: "0.1.0"}
+		if err := p.validate(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+		if p.Class != "Greeter" {
+			t.Errorf("%s: class %q", name, p.Class)
+		}
+	}
+	for _, name := range []string{"", ".greeter", "acme.", "acme..greeter", "acme/greeter", "acme.class", "Acme.greeter", "acme.foo-bar", "gobridge", "gobridge.greeter"} {
+		p := project{Name: name, Class: "Greeter", Command: ".", Version: "0.1.0"}
+		if err := p.validate(); err == nil {
+			t.Errorf("accepted %q", name)
+		}
+	}
+	p := project{Name: "acme.tools.greeter"}
+	if p.packagePath() != filepath.Join("acme", "tools", "greeter") || p.binaryName() != "acme_tools_greeter" || p.distributionName() != "acme-tools-greeter" {
+		t.Fatalf("incorrect namespace naming: %+v", p)
+	}
+}

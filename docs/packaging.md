@@ -15,7 +15,7 @@ Replace `gobridge.json` with:
 
 ```json
 {
-  "name": "acme_greeter",
+  "name": "acme.greeter",
   "class": "Greeter",
   "source": ".",
   "command": "./cmd/greeter",
@@ -29,13 +29,13 @@ Replace `gobridge.json` with:
 
 | Field | Meaning and default |
 | --- | --- |
-| `name` | Python import package and executable filename. One lowercase identifier, with underscores allowed; no dots, hyphens, Python keywords, or `gobridge`. |
-| `class` | Generated client class; defaults to PascalCase derived from `name`, so `acme_greeter` becomes `AcmeGreeter`. Set `Greeter` explicitly to keep the shorter API. |
+| `name` | Python import path: dot-separated lowercase identifiers with underscores allowed. Namespace parents have no `__init__.py`. The executable replaces dots with underscores. No hyphens, Python keywords, or top-level `gobridge`. |
+| `class` | Generated client class; defaults to PascalCase from the last component, so `acme.greeter` becomes `Greeter` and `acme.text_kit` becomes `TextKit`. Flat `acme_greeter` still becomes `AcmeGreeter`. |
 | `source` | Annotated Go library directory, relative to the project root. Omit for a manually registered registry. |
 | `command` | Go command package to compile. The directory need not match the executable's generated name. |
 | `version` | Your application package version; defaults to `0.1.0`. Use a stable `X.Y.Z`; prereleases are not currently supported by the wheel builder. |
-| `python_distribution` | Name used by pip/PyPI; defaults to `name` with underscores replaced by hyphens. |
-| `npm_package` | Name used by npm and JS/TS imports; defaults to `name` with underscores replaced by hyphens. May include an `@scope/` prefix. |
+| `python_distribution` | Name used by pip/PyPI; defaults to `name` with dots and underscores replaced by hyphens. |
+| `npm_package` | Name used by npm and JS/TS imports; defaults to `name` with dots and underscores replaced by hyphens. May include an `@scope/` prefix. |
 | `repository` | Optional source repository URL included in package metadata. |
 | `license` | Optional application license identifier. Include your actual `LICENSE` file in the project root too. |
 
@@ -60,14 +60,14 @@ acme_greeter-0.1.0-py3-none-manylinux_2_17_x86_64.musllinux_1_2_x86_64.whl
 ```
 
 The underscores in the filename are wheel name normalization. The install name
-remains `acme-greeter`, while the import is `acme_greeter`.
+remains `acme-greeter`, while the import is `acme.greeter`.
 See Python's [distribution versus import package explanation](https://packaging.python.org/en/latest/discussions/distribution-package-vs-import-package/).
 
 Save this as `app.py` and run `python app.py`:
 
 ```python
 import asyncio
-from acme_greeter import greet
+from acme.greeter import greet
 
 async def main():
     print(await greet(name="World"))
@@ -75,11 +75,11 @@ async def main():
 asyncio.run(main())
 ```
 
-For synchronous code, use `from acme_greeter import greet_sync`. If you added the
+For synchronous code, use `from acme.greeter import greet_sync`. If you added the
 README's stateful Go constructor, you can also use:
 
 ```python
-from acme_greeter import SyncGreeter
+from acme.greeter import SyncGreeter
 
 with SyncGreeter(prefix="Hello, ") as client:
     print(client.welcome(name="World"))
@@ -89,10 +89,10 @@ The wheel contains:
 
 | Installed path | Purpose |
 | --- | --- |
-| `acme_greeter/__init__.py` | Generated typed functions, clients, and result classes |
-| `acme_greeter/py.typed` | Marker for type checkers and editors |
-| `acme_greeter/_gobridge/` | Private transport runtime and its license |
-| `acme_greeter/_bin/acme_greeter` | Executable for this wheel's platform; `.exe` on Windows |
+| `acme/greeter/__init__.py` | Generated typed functions, clients, and result classes |
+| `acme/greeter/py.typed` | Marker for type checkers and editors |
+| `acme/greeter/_gobridge/` | Private transport runtime and its license |
+| `acme/greeter/_bin/acme_greeter` | Executable for this wheel's platform; `.exe` on Windows |
 | `acme_greeter-0.1.0.dist-info/` | Distribution metadata, wheel tags, file records, and application license when provided |
 
 Consumers need Python 3.10+ only. The binary is located relative to the installed
@@ -103,19 +103,27 @@ description; you do not need a handwritten `pyproject.toml` for this workflow.
 
 ### Python namespaces
 
-`acme_greeter` provides an organization-prefixed import name. It is a regular
-Python package, not a PEP 420 namespace package. Setting the distribution to
-`acme-greeter` or `acme.greeter` does not create `from acme.greeter import greet`.
-The CLI currently rejects `"name": "acme.greeter"`; there is no `namespace` field.
+`"name": "acme.greeter"` creates a native PEP 420 namespace package. Only the
+leaf `acme/greeter/` contains `__init__.py`, `py.typed`, the private runtime, and
+the executable. The parent `acme/` deliberately has no `__init__.py` or
+`py.typed`, allowing independently installed distributions to share it.
 
-If a shared `acme.*` namespace is a hard requirement, you need a custom packaging
-pipeline or namespace support added to the builder. A native namespace layout
-would put the complete generated package at `acme/greeter/` and omit
-`acme/__init__.py`; its bindings, private runtime, typing marker, and binary must
-stay together. Renaming an already-built wheel is insufficient: its contents and
-`RECORD` also need to describe the correct paths. Follow the
-[Python namespace packaging guide](https://packaging.python.org/guides/packaging-namespace-packages/)
-for that custom layout. The commands on this page use the supported flat package.
+For another library, use `"name": "acme.textkit"` with
+`"python_distribution": "acme-textkit"`. Consumers can install both distributions
+and import `acme.greeter` and `acme.textkit`. Each leaf carries its own runtime and
+binary; uninstalling one leaves the other intact. Deeper paths such as
+`acme.tools.greeter` work the same way.
+
+Choose distinct leaf paths for independent distributions. Do not install a
+regular `acme` package containing `acme/__init__.py` alongside these namespace
+packages: it can prevent namespace discovery across import locations. Dev mode
+rejects existing regular-package parents rather than modifying handwritten files.
+See the [Python namespace packaging guide](https://packaging.python.org/guides/packaging-namespace-packages/)
+for how independently distributed namespace portions compose.
+
+The distribution name remains independent: setting only
+`"python_distribution": "acme-greeter"` does not change the import path.
+`"name": "acme_greeter"` remains supported for a flat organization-prefixed package.
 
 ### Local Python development
 
@@ -125,10 +133,13 @@ With the same manifest and `app.py` above:
 gobridge dev -- python app.py
 ```
 
-The dev command generates `build/acme_greeter`, adds `build` to the application's
+The dev command generates `build/acme/greeter`, adds `build` to the application's
 `PYTHONPATH`, and rebuilds/restarts on source changes. A pip install is unnecessary
 in this loop. Use `gobridge dev --once` to generate without running a watcher;
 your own application launcher then needs `build` on its Python import path.
+For a custom output, use `--python generated/acme/greeter`; the path must end in
+the complete namespace path. The watcher automatically adds `generated`, not
+`generated/acme`, to `PYTHONPATH`.
 
 ## Build and use the TypeScript package
 
@@ -213,7 +224,7 @@ browser bundle.
 
 `gobridge dev` currently watches Python applications. For TypeScript development,
 rebuild the tarball and reinstall it in your consumer project, then restart the
-application. Do not point TypeScript consumers at `build/acme_greeter`.
+application. Do not point TypeScript consumers at `build/acme/greeter`.
 
 ## Targets, versions, and publication
 
