@@ -31,7 +31,7 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 	targets := flags.String("targets", "all", "all or comma-separated OS-architecture targets")
 	flags.StringVar(&p.Source, "dir", p.Source, "annotated library directory; omit for manual registration")
 	flags.StringVar(&p.Command, "command", p.Command, "Go executable package")
-	flags.StringVar(&p.Name, "name", p.Name, "import package and binary name")
+	flags.StringVar(&p.Name, "name", p.Name, "Python import path (dots allowed; binary uses underscores)")
 	flags.StringVar(&p.Class, "class", p.Class, "generated client class")
 	flags.StringVar(&p.Version, "version", p.Version, "application package version")
 	flags.StringVar(&p.PythonDistribution, "distribution", p.PythonDistribution, "Python distribution name")
@@ -52,10 +52,10 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		*python = true
 	}
 	if p.PythonDistribution == "" {
-		p.PythonDistribution = strings.ReplaceAll(p.Name, "_", "-")
+		p.PythonDistribution = p.distributionName()
 	}
 	if p.NPMPackage == "" {
-		p.NPMPackage = strings.ReplaceAll(p.Name, "_", "-")
+		p.NPMPackage = p.distributionName()
 	}
 	if p.Source != "" {
 		if err := sourcegen.Generate(p.Source, "zz_gobridge.gen.go"); err != nil {
@@ -101,7 +101,7 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		command.Stderr = log
 		return command.Run()
 	}
-	common := []string{"--project", root, "--go-package", p.Command, "--class", p.Class, "--binary", p.Name, "--version", p.Version, "--repository", p.Repository, "--license", p.License}
+	common := []string{"--project", root, "--go-package", p.Command, "--class", p.Class, "--binary", p.binaryName(), "--version", p.Version, "--repository", p.Repository, "--license", p.License}
 	targetArgs := []string{}
 	if *targets != "all" {
 		targetArgs = append(targetArgs, "--targets")

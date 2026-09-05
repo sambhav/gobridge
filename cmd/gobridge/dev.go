@@ -39,9 +39,9 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 	flags.SetOutput(log)
 	flags.StringVar(&options.Source, "dir", p.Source, "annotated library directory; omit for manual registration")
 	flags.StringVar(&options.Command, "command", p.Command, "Go executable package")
-	flags.StringVar(&options.Name, "name", p.Name, "Python import and binary name")
+	flags.StringVar(&options.Name, "name", p.Name, "Python import path (dots allowed; binary uses underscores)")
 	flags.StringVar(&options.Class, "class", p.Class, "generated client class")
-	flags.StringVar(&options.output, "python", "", "generated Python package directory (default build/<name>)")
+	flags.StringVar(&options.output, "python", "", "generated Python package directory (default build/<package/path>)")
 	flags.DurationVar(&options.interval, "interval", 500*time.Millisecond, "source polling interval")
 	flags.BoolVar(&options.once, "once", false, "build one matching package and exit")
 	if err := flags.Parse(args); err != nil {
@@ -61,11 +61,23 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 		return fmt.Errorf("--once does not run an application; omit --once for reload")
 	}
 	if options.output == "" {
-		options.output = filepath.Join("build", options.Name)
+		options.output = filepath.Join("build", options.packagePath())
 	}
 	options.output = absolute(options.output)
-	if filepath.Base(options.output) != options.Name {
-		return fmt.Errorf("--python must end in the import package name %q", options.Name)
+	packageRoot := options.output
+	parts := strings.Split(options.Name, ".")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if filepath.Base(packageRoot) != parts[i] {
+			return fmt.Errorf("--python must end in the import package path %q", options.packagePath())
+		}
+		if i < len(parts)-1 {
+			if _, err := os.Stat(filepath.Join(packageRoot, "__init__.py")); err == nil {
+				return fmt.Errorf("namespace parent must not contain __init__.py: %s", packageRoot)
+			} else if !os.IsNotExist(err) {
+				return err
+			}
+		}
+		packageRoot = filepath.Dir(packageRoot)
 	}
 	if err := prepareDevOutput(options.output); err != nil {
 		return err
@@ -104,7 +116,7 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 		}
 		if len(options.app) > 0 {
 			var err error
-			app, err = startDevApp(options.app, filepath.Dir(options.output))
+			app, err = startDevApp(options.app, packageRoot)
 			if err != nil {
 				fmt.Fprintln(log, "Application:", err)
 			}
@@ -189,7 +201,7 @@ func buildDev(ctx context.Context, options devOptions, log io.Writer) error {
 	if err != nil {
 		return err
 	}
-	stem := options.Name + "-" + hex.EncodeToString(hash.Sum(nil))[:24]
+	stem := options.binaryName() + "-" + hex.EncodeToString(hash.Sum(nil))[:24]
 	generate := exec.CommandContext(ctx, binary, "generate-python", "--class", options.Class, "--binary", stem)
 	generate.Stderr = log
 	bindings, err := generate.Output()

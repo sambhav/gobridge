@@ -38,8 +38,9 @@ names, so `Bind` supplies them explicitly. `NewObject(registry, NewGreeter)` plu
 `Register` accepts typed request/response functions when you already have request
 structs and want a direct Go invocation path.
 
-In `gobridge.json`, `name` supplies the import and binary name; the class defaults
-to `Greeter`. `source` selects the library package; omit it for manual registration.
+In `gobridge.json`, `name` supplies the Python import path (for example
+`acme.greeter`); dots become underscores in the binary name. The class defaults
+to PascalCase from the final component (`Greeter`). `source` selects the library package; omit it for manual registration.
 `command` selects the Go executable. Optional `class`, `python_distribution`,
 `npm_package`, `repository`, and `license` customize package metadata. Distribution
 names can differ from the import, for example `acme-greeter` and `@acme/greeter`.

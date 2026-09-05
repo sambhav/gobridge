@@ -115,7 +115,12 @@ def wait_for(predicate, message, timeout=40):
     raise AssertionError(message)
 
 
-def test_dev_watch_reloads_python_and_go_and_keeps_app_on_build_failure(author_cli, project):
+@pytest.mark.parametrize("package_name", ["greeter", "acme.tools.greeter"])
+def test_dev_watch_reloads_python_and_go_and_keeps_app_on_build_failure(author_cli, project, package_name):
+    manifest = json.loads((project / "gobridge.json").read_text())
+    manifest["name"] = package_name
+    (project / "gobridge.json").write_text(json.dumps(manifest))
+    package_dir = project / "build" / Path(*package_name.split("."))
     app = project / "app.py"
     records = project / "requests.txt"
     log_path = project / "dev.log"
@@ -125,7 +130,7 @@ while True:
     with open("requests.txt", "a", encoding="utf-8") as output:
         output.write(greet_sync(name="Sam") + "\\n")
     time.sleep(0.1)
-''')
+'''.replace('from greeter import', f'from {package_name} import'))
     def contents(path):
         return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
     env = dict(os.environ, PYTHONPATH=str(ROOT / "python" / "src"))
@@ -136,10 +141,10 @@ while True:
                                    env=env, creationflags=flags)
         try:
             wait_for(lambda: "v1:Sam" in contents(records), "initial application did not start: " + contents(log_path))
-            binaries = set((project / "build" / "greeter" / "_bin").iterdir())
+            binaries = set((package_dir / "_bin").iterdir())
             app.write_text(app.read_text().replace('name="Sam"', 'name="Bob"'))
             wait_for(lambda: "v1:Bob" in contents(records), "Python edit did not reload")
-            assert set((project / "build" / "greeter" / "_bin").iterdir()) == binaries
+            assert set((package_dir / "_bin").iterdir()) == binaries
             source = project / "greeter.go"
             source.write_text(source.read_text().replace('"v1:"', '"v2:"'))
             wait_for(lambda: "v2:Bob" in contents(records), "Go edit did not reload")
@@ -158,3 +163,22 @@ while True:
                     process.wait(timeout=5)
                     pytest.fail("watcher did not stop its application")
         assert process.returncode == 0, contents(log_path)
+
+
+def test_dotted_dev_custom_output_and_namespace_ownership(author_cli, project):
+    manifest = json.loads((project / "gobridge.json").read_text())
+    manifest["name"] = "acme.tools.greeter"
+    (project / "gobridge.json").write_text(json.dumps(manifest))
+    output = project / "custom" / "acme" / "tools" / "greeter"
+    dev(author_cli, project, "--once", "--python", str(output))
+    assert not (output.parent / "__init__.py").exists()
+    assert not (output.parent.parent / "__init__.py").exists()
+    subprocess.run([sys.executable, "-c", 'from acme.tools.greeter import Greeter, greet_sync; assert greet_sync(name="Sam") == "v1:Sam"'],
+                   cwd=project, env=dict(os.environ, PYTHONPATH=str(project / "custom")), check=True)
+    invalid = dev(author_cli, project, "--once", "--python", str(project / "wrong" / "greeter"), success=False)
+    assert "import package path" in invalid.stderr
+    parent_init = output.parent / "__init__.py"
+    parent_init.write_text("handwritten = True\n")
+    blocked = dev(author_cli, project, "--once", "--python", str(output), success=False)
+    assert "namespace parent" in blocked.stderr
+    assert parent_init.read_text() == "handwritten = True\n"
