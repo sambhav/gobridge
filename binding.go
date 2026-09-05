@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"reflect"
 	"strings"
 )
@@ -134,13 +133,10 @@ func decodeInput(raw json.RawMessage, t reflect.Type) (reflect.Value, error) {
 		return reflect.Value{}, err
 	}
 	v := reflect.New(t)
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	if err := d.Decode(v.Interface()); err != nil {
+	// Structural validation above is strict; Unmarshal supplies scalar/range
+	// checks and rejects multiple JSON values without a streaming decoder.
+	if err := json.Unmarshal(raw, v.Interface()); err != nil {
 		return reflect.Value{}, err
-	}
-	if err := d.Decode(new(any)); err != io.EOF {
-		return reflect.Value{}, fmt.Errorf("expected a single JSON object")
 	}
 	return v.Elem(), nil
 }

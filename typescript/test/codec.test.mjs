@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { encode, decode, parseWire, stringifyWire, parseSchema } from "../dist/codec.js";
+import { encode, decode, compileCodec, parseWire, stringifyWire, parseSchema } from "../dist/codec.js";
 import { InvalidArgumentError, DaemonError, errorFromWire, BridgeError, AbortError } from "../dist/errors.js";
 
 const int64 = {kind: "int64"};
@@ -63,4 +63,55 @@ test("malformed errors cannot strand pending requests", () => {
   for (const value of [null,[],{}, {code:[],message:"x"},{code:"x",message:1}]) assert.throws(()=>errorFromWire(value),DaemonError);
   assert.ok(errorFromWire({code:"cancelled",message:"x"}) instanceof AbortError);
   assert.ok(errorFromWire({code:"constructor",message:"x"}) instanceof BridgeError);
+});
+
+test("compiled codecs preserve generic values, rejection and field paths", () => {
+  const scalarCases = [
+    ['string', ['ok', null, 1]], ['bool', [true, null, 'true']],
+    ['int8', [-128, 127, 128, 1.5, null]], ['int', [42, 2**54, null]],
+    ['int64', [0n, 9007199254740993n, 2n**63n, 42, null]],
+    ['float64', [1.5, 2n**64n, Infinity, null]],
+    ['bytes', [new Uint8Array([0,255]), 'AP8=', 'bad!', null]],
+    ['timestamp', ['2026-01-01T00:00:00.123456789Z', 'bad', null]],
+    ['void', [undefined, null, 1]],
+  ];
+  const outcome = call => {
+    try { return {value:call()}; }
+    catch (error) { return {error:error.constructor.name,code:error.code,message:error.message}; }
+  };
+  for (const [kind, values] of scalarCases) {
+    const scalar = {kind};
+    for (const type of [scalar, {kind:'ptr',elem:scalar}, {kind:'slice',elem:scalar},
+      {kind:'map',elem:scalar}, {kind:'struct',fields:[{name:'some_value',type:scalar}]}]) {
+      const codec = compileCodec(type);
+      for (const value of values) {
+        const variants = [value, [value], {someValue:value}, {some_value:value}, {},
+          {unexpected:value}, Object.fromEntries([['__proto__',value],['constructor',value]])];
+        for (const variant of variants) {
+          assert.deepEqual(outcome(()=>codec.encode(variant)),outcome(()=>encode(type,variant)));
+          assert.deepEqual(outcome(()=>codec.decode(variant)),outcome(()=>decode(type,variant)));
+        }
+      }
+    }
+  }
+});
+
+test("compiled schema snapshot is independent of later metadata edits", () => {
+  const type = {kind:'struct',fields:[{name:'old_name',type:{kind:'string'}}]};
+  const codec = compileCodec(type);
+  type.fields[0].name = 'new_name';
+  type.fields[0].type.kind = 'int';
+  assert.deepEqual(codec.encode({oldName:'value'}),{old_name:'value'});
+  assert.throws(()=>codec.encode({newName:1}), /unknown field/);
+});
+
+test("compiled struct fields cannot change the output prototype", () => {
+  const type = {kind:'struct',fields:[{name:'__proto__',type:{kind:'string'}}]};
+  // camelCase preserves this codec's existing spelling conversion in both modes.
+  const value = Object.fromEntries([['__proto__','data']]);
+  assert.deepEqual(compileCodec(type).decode(value), decode(type,value));
+  const encoded = compileCodec(type).encode({Proto:'data'});
+  assert.equal(Object.getPrototypeOf(encoded),Object.prototype);
+  assert.equal(Object.hasOwn(encoded,'__proto__'),true);
+  assert.equal(encoded.__proto__,'data');
 });

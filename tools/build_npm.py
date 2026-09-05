@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 
 from package_customization import copy_package, settings
+from packaging_common import build_go_binary
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "typescript"
@@ -50,6 +51,7 @@ def pack(stage, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--targets", nargs="+", choices=TARGETS, default=list(TARGETS))
+    parser.add_argument("--build-cache", type=Path, help="reuse Go link outputs; Go still checks sources and flags")
     parser.add_argument("--go-package", default="./examples/greeter/cmd/greeter", help="Go command package to build")
     parser.add_argument("--class", dest="client_class", default="Greeter", help="Generated TypeScript client class")
     parser.add_argument("--binary", default="greeter", help="Executable filename without .exe")
@@ -91,7 +93,8 @@ def main():
             shutil.copyfile(args.host_binary, host)
             host.chmod(0o755)
         else:
-            subprocess.run(["go", "build", "-o", str(host), args.go_package], cwd=project, env=host_env, check=True)
+            build_go_binary(host, args.go_package, project, host_env, cache=args.build_cache)
+            host.chmod(0o755)
         bindings = subprocess.check_output([
             str(host), "generate-typescript", "--class", args.client_class, "--binary", args.binary,
         ])
@@ -167,7 +170,7 @@ def main():
             if args.host_binary:
                 shutil.copyfile(host, binary)
             else:
-                subprocess.run(["go", "build", "-trimpath", "-o", str(binary), args.go_package], cwd=project, env=env, check=True)
+                build_go_binary(binary, args.go_package, project, env, cache=args.build_cache, trimpath=True)
             binary.chmod(0o755)
             print("Built", node_target, flush=True)
         if args.dev_output:

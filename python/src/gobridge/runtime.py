@@ -117,7 +117,9 @@ def _json_default(value):
     if isinstance(value, bytes):
         return base64.b64encode(value).decode("ascii")
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return dataclasses.asdict(value)
+        # JSON visits nested values itself. asdict would recursively copy the
+        # entire graph before the encoder traverses that same graph again.
+        return {field.name: getattr(value, field.name) for field in dataclasses.fields(value)}
     raise TypeError(f"Cannot encode {type(value).__name__}")
 
 
@@ -132,23 +134,47 @@ def _type_hints(cls):
     return typing.get_type_hints(cls, globalns=namespace, localns=namespace)
 
 
+@lru_cache(maxsize=512)
+def _decoder(cls):
+    """Compile a bounded, reusable conversion graph without per-item dispatch."""
+    identity = lambda value: value
+    memo = {}
+
+    def compile_type(cls):
+        if cls in (str, int, float, bool, typing.Any):
+            return identity
+        if cls in memo:
+            return memo[cls]
+        # A forward closure supports recursive dataclasses. The graph is local
+        # to this cache entry and is collected when the bounded cache evicts it.
+        convert = identity
+        def nullable(value):
+            return None if value is None else convert(value)
+        memo[cls] = nullable
+        origin, args = typing.get_origin(cls), typing.get_args(cls)
+        if cls is bytes:
+            convert = lambda value: base64.b64decode(value, validate=True)
+        elif origin in (types.UnionType, typing.Union):
+            convert = compile_type(next(t for t in args if t is not type(None)))
+        elif dataclasses.is_dataclass(cls):
+            fields = {k: compile_type(t) for k, t in _type_hints(cls).items()}
+            convert = lambda value: cls(**{k: fields[k](v) for k, v in value.items()})
+        elif origin is list:
+            child = compile_type(args[0])
+            convert = list if child is identity else lambda value: [child(v) for v in value]
+        elif origin is dict:
+            child = compile_type(args[1])
+            convert = dict if child is identity else lambda value: {k: child(v) for k, v in value.items()}
+        return nullable
+
+    return compile_type(cls)
+
+
 def decode(cls: type[T], value: typing.Any) -> T:
     """Reconstruct generated dataclasses, recursively including containers."""
-    if value is None:
+    if value is None or cls in (str, int, float, bool):
         return value
-    if cls is bytes:
-        return base64.b64decode(value, validate=True)
-    origin, args = typing.get_origin(cls), typing.get_args(cls)
-    if origin in (types.UnionType, typing.Union):
-        return decode(next(t for t in args if t is not type(None)), value)
-    if dataclasses.is_dataclass(cls):
-        hints = _type_hints(cls)
-        return cls(**{k: decode(hints[k], v) for k, v in value.items()})
-    if origin is list:
-        return [decode(args[0], v) for v in value]
-    if origin is dict:
-        return {k: decode(args[1], v) for k, v in value.items()}
-    return value
+    return _decoder(cls)(value)
 
 
 class _Transport:

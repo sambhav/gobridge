@@ -18,7 +18,7 @@ func buildDevTypeScript(ctx context.Context, options devOptions, binary string, 
 	}
 	// Dependencies belong to this development package, never the Go module cache.
 	tooling := filepath.Join(options.output, ".tooling")
-	for _, path := range []string{"typescript/src", "typescript/package.json", "typescript/package-lock.json", "tools/build_npm.py", "tools/package_customization.py", "LICENSE"} {
+	for _, path := range []string{"typescript/src", "typescript/package.json", "typescript/package-lock.json", "tools/build_npm.py", "tools/package_customization.py", "tools/packaging_common.py", "LICENSE"} {
 		if err := copyBuildAsset(root, tooling, path); err != nil {
 			return err
 		}

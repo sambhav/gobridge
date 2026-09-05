@@ -44,3 +44,7 @@ node_modules/
 
 # Bindings generated from integration fixtures.
 /.generated/
+
+# Descriptive benchmark output (CI uploads these as artifacts).
+/benchmark-results.json
+/benchmark-results.md

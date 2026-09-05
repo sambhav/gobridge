@@ -86,9 +86,9 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	assets := []string{"LICENSE", "tools/package_customization.py"}
+	assets := []string{"LICENSE", "tools/package_customization.py", "tools/packaging_common.py"}
 	if *python {
-		assets = append(assets, "python/pyproject.toml", "python/src", "tools/build_wheels.py", "tools/packaging_common.py")
+		assets = append(assets, "python/pyproject.toml", "python/src", "tools/build_wheels.py")
 	}
 	if *typescript {
 		assets = append(assets, "typescript/src", "typescript/package.json", "typescript/package-lock.json", "tools/build_npm.py")
@@ -113,7 +113,7 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		return command.Run()
 	}
 	artifacts := filepath.Join(stage, "artifacts")
-	common := []string{"--project", root, "--go-package", p.Command, "--class", p.Class, "--binary", p.binaryName(), "--version", p.Version, "--repository", p.Repository, "--license", p.License}
+	common := []string{"--project", root, "--go-package", p.Command, "--class", p.Class, "--binary", p.binaryName(), "--version", p.Version, "--repository", p.Repository, "--license", p.License, "--build-cache", filepath.Join(stage, "go-build")}
 	targetArgs := []string{}
 	if *targets != "all" {
 		targetArgs = append(targetArgs, "--targets")

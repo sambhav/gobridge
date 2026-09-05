@@ -41,6 +41,7 @@ jobs:
       - run: npm ci --ignore-scripts
         working-directory: typescript
       - run: python tools/check_typescript.py
+      - run: python tools/stress.py --rounds 12
   package-workflows:
     strategy:
       fail-fast: false
@@ -90,6 +91,7 @@ jobs:
       - run: go run ./cmd/gobridge build --typescript
       - run: python -m pip install setuptools==80.9.0 wheel==0.45.1 twine==6.2.0
       - run: python tools/test_project_build.py
+      - run: python tools/test_build_cache.py
       - run: python tools/check_versions.py
       - run: python tools/test_release.py
       - name: Verify all six CLI release archives without publishing
@@ -142,12 +144,23 @@ jobs:
           python-version: '3.12'
       - run: go test -run '^$' -bench . -benchmem > go-bench.txt
       - run: python tools/benchmark.py --calls 1000 > python-bench.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts
+        working-directory: typescript
+      - run: python tools/test_bench.py
+      - run: python tools/bench.py --calls 100 --repeats 1 --cases tiny,nested --concurrency 1,8
+      - run: go test -run '^$' -fuzz '^FuzzDecodeInput$' -fuzztime 10s -parallel 2
+      - run: go test -run '^$' -fuzz '^FuzzProtocolFrames$' -fuzztime 10s -parallel 2
       - uses: actions/upload-artifact@v4
         with:
           name: benchmarks
           path: |
             go-bench.txt
             python-bench.json
+            benchmark-results.json
+            benchmark-results.md
   integration:
     strategy:
       fail-fast: false
