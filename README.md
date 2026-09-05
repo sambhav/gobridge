@@ -15,9 +15,9 @@ from greeter import greet
 message = await greet(name="World")  # "Hello, World!"
 ```
 
-**Development preview:** nothing is published yet. This is the single user guide;
-follow it until you have what you need. The code below is available on the
-[draft PR](https://github.com/sambhav/gobridge/pull/1).
+Install a generated package to use it, or add gobridge to your Go project to
+build your own. Python users need Python 3.10+; Node users need Node 24+.
+Only library authors need Go.
 
 1. [Try a function](#1-try-a-function)
 2. [Call from Python](#2-call-from-python)
@@ -32,30 +32,24 @@ follow it until you have what you need. The code below is available on the
 
 ## 1. Try a function
 
-Development requires Go 1.23+ and Python 3.10+. Clone this branch, then run:
+Install the complete example from PyPI:
 
 ```sh
-git clone --branch feat/go-cli-python https://github.com/sambhav/gobridge.git
-cd gobridge
-python -m pip install -e ./python
-go generate ./examples/greeter
-go run ./examples/greeter/cmd/greeter greet --name World
+python -m pip install gobridge-greeter-example
+python -c 'from greeter import greet_sync; print(greet_sync(name="World"))'
 ```
 
-The last command prints `"Hello, World!"`. Explore the CLI with `--help` or
-`welcome --help`. Operation help shows argument types, validation and constructor
-options. Calls print JSON to stdout; errors and logs go to stderr. JSON input
-also works: `greet --json '{"name":"World"}'`, or `--json -` to read stdin.
+This prints `Hello, World!`. Pip installs the Python runtime dependency and the
+wheel for your platform, including its Go executable. There is no separate binary
+download, Go installation or post-install build. The distribution name is
+`gobridge-greeter-example`; the Python import is `greeter`.
+
+For Node, use `npm install gobridge-greeter-example`, then follow
+[the TypeScript example](#7-use-typescript).
 
 ## 2. Call from Python
 
-Build a local importable package into `build/greeter`:
-
-```sh
-go run ./cmd/gobridge dev --once
-```
-
-Create `build/app.py` so Python finds the package beside your script:
+Create `app.py`:
 
 ```python
 import asyncio
@@ -67,10 +61,9 @@ async def main():
 asyncio.run(main())
 ```
 
-Run `python build/app.py`. In an async application or notebook, use `await` in
+Run `python app.py`. In an async application or notebook, use `await` in
 its existing event loop. Importing starts no process. Calls reuse one private Go
-daemon, and normal process exit cleans it up. A packaged wheel has the same import
-experience without requiring a Go toolchain.
+daemon, and normal process exit cleans it up. No process starts until you make the first call.
 
 **Python is async by default.** Every operation is a real `async def` with typed,
 keyword-only arguments. Python yields while Go works, so calls can overlap:
@@ -124,42 +117,74 @@ with SyncGreeter(prefix="Hey, ") as greeter:
 The CLI supplies the same options before an operation:
 
 ```sh
-go run ./examples/greeter/cmd/greeter \
+go run ./cmd/greeter \
   --config '{"prefix":"Hey, "}' welcome --name Sam
 ```
 
 ## 4. Expose your Go library
 
-Keep your library in an importable Go package. Add `//gobridge:export` to functions
-or methods you want to expose and `//gobridge:constructor` to a constructor:
+Start in your Go module. Install gobridge and its author command:
+
+```sh
+go get github.com/sambhav/gobridge@latest
+go install github.com/sambhav/gobridge/cmd/gobridge@latest
+python -m pip install 'gobridge-runtime[build]'
+```
+
+Use a Python virtual environment for development, and put Go's binary directory
+on `PATH`. Go 1.23+ is supported. The `build` extra installs the wheel-building
+tools; generated packages depend only on the small runtime.
+
+For a new example, run `go mod init example.com/greeter` before `go get`. Put this
+in `greeter.go`:
 
 ```go
-type Options struct {
-    Prefix *string `json:"prefix,omitempty"`
-}
+package greeter
 
-//gobridge:constructor
-func NewGreeter(options Options) (*Greeter, error) {
-    // Apply your library's defaults or functional options here.
-    return newGreeter(options), nil
-}
+//go:generate gobridge generate --dir .
 
 //gobridge:export
-func (g *Greeter) Welcome(ctx context.Context, name string) (string, error) {
-    return g.welcome(ctx, name)
+func Greet(name string) string { return "Hello, " + name + "!" }
+```
+
+Create `cmd/greeter/main.go` (use your actual module import path):
+
+```go
+package main
+
+import greeter "example.com/greeter"
+
+func main() {
+    registry, err := greeter.NewGobridge()
+    if err != nil { panic(err) }
+    registry.Main()
 }
 ```
 
-The bodies above stand in for your library's implementation; the
-[complete example](examples/greeter/greeter.go) includes a concurrent counter.
-Install the generator with `go install ./cmd/gobridge`, put Go's binary directory
-on `PATH`, and add `//go:generate gobridge generate --dir .` to your library.
-Run `go generate ./...` in your project.
+Add `gobridge.json` at the module root:
 
-Generation creates `NewGobridge() (*gobridge.Registry, error)` in the same package.
-A [small command package](examples/greeter/cmd/greeter/main.go) calls it,
-checks the error, and runs `registry.Main()`. Native Go consumers import the
-library and call `Greet` or `NewGreeter` directly in their own process.
+```json
+{
+  "name": "greeter",
+  "source": ".",
+  "command": "./cmd/greeter",
+  "version": "0.1.0"
+}
+```
+
+Run `gobridge dev --once`. This generates the Go adapter and an importable Python
+package in `build/greeter`. `gobridge dev -- python app.py` also places that package
+on Python's import path and restarts your app on edits. Your native Go consumers
+continue to call `greeter.Greet(...)` directly.
+
+Run `go run ./cmd/greeter greet --name World` for the CLI. Use `--help` or
+`greet --help` for types and argument help. Operations print JSON to stdout;
+diagnostics go to stderr. `--json '{"name":"World"}'` and `--json -` also work.
+
+Add `//gobridge:constructor` to a constructor taking a named options struct, and
+`//gobridge:export` to its methods to get the classes shown earlier. The
+[complete greeter source](examples/greeter/greeter.go) demonstrates defaults,
+functional options, methods and concurrent state.
 
 | Declaration | Behavior |
 | --- | --- |
@@ -189,22 +214,11 @@ names, so `Bind` supplies them explicitly. `NewObject(registry, NewGreeter)` plu
 `Register` accepts typed request/response functions when you already have request
 structs and want a direct Go invocation path.
 
-Keep build settings in `gobridge.json` at your project's root:
-
-```json
-{
-  "name": "greeter",
-  "source": ".",
-  "command": "./cmd/greeter"
-}
-```
-
-`name` supplies the Python import and binary name; the client class defaults to
-`Greeter`. `source` selects the annotated library package; omit it for manual
-registration. `command` selects the Go executable. Optional `class`, `version`,
-`python_distribution`, and `npm_package` customize generated artifacts. This
-checkout includes a manifest pointing at its example, so the commands below work
-without extra flags. Installed authors use `gobridge` instead of `go run ./cmd/gobridge`.
+In `gobridge.json`, `name` supplies the import and binary name; the class defaults
+to `Greeter`. `source` selects the library package; omit it for manual registration.
+`command` selects the Go executable. Optional `class`, `python_distribution`,
+`npm_package`, `repository`, and `license` customize package metadata. Distribution
+names can differ from the import, for example `acme-greeter` and `@acme/greeter`.
 
 ## 5. Develop without rebuilding by hand
 
@@ -212,12 +226,12 @@ Run the dev command without `--once` to watch source changes. Add your Python
 command after `--` to restart it after successful updates:
 
 ```sh
-go run ./cmd/gobridge dev -- python build/app.py
+gobridge dev -- python app.py
 ```
 
 The loop watches Go/Python source and Go module files beneath the current working
 directory. Go edits regenerate adapters, build the executable and regenerate
-Python bindings. Omit `--dir` for manual registration. Python-only edits restart
+Python bindings. Omit `source` from the manifest for manual registration. Python-only edits restart
 the application without rebuilding Go. Output and dependency directories are ignored.
 
 Each successful build writes a binary under a content-derived filename, then
@@ -305,60 +319,61 @@ cannot spawn local processes and are outside this transport's scope.
 
 ## 8. Ship a package
 
-Bundle cross-compiled executables with generated bindings. Consumers need only
-Python or Node. These reference recipes build Linux/macOS/Windows on amd64/arm64
-with `CGO_ENABLED=0`.
-
-Build wheels with one command:
+From your Go project, build the formats you need:
 
 ```sh
-python -m pip install setuptools wheel
-go run ./cmd/gobridge build --python
-python -m pip install --no-index --find-links dist gobridge-greeter-example
+gobridge build --python
+gobridge build --typescript
+# Or build both:
+gobridge build --python --typescript
 ```
 
-Build npm packages, or both formats together:
+That is the complete build step. It reads `gobridge.json`, regenerates adapters,
+cross-compiles the executable and packages typed bindings beside it. Python build
+tools come from the `build` extra installed earlier. TypeScript builds additionally
+need Node 24+ and npm; the compiler is installed in temporary staging.
+
+| Output | What you publish | What consumers install |
+| --- | --- | --- |
+| `dist/*.whl` | Your Python wheels, one per platform | `pip install acme-greeter` |
+| `dist/npm/*.tgz` | Your npm package, containing selected platforms | `npm install @acme/greeter` |
+
+The names above illustrate `python_distribution` and `npm_package`. Only your
+packages appear in the output; their exact gobridge runtime dependency is installed
+from the registry automatically. You do not rebuild or republish gobridge itself.
+For an offline bundle, opt into `--include-runtime` and install all the artifacts
+from that directory.
+
+All six Linux/macOS/Windows × amd64/arm64 targets are built by default, with
+`CGO_ENABLED=0`. Linux binaries are checked for static linkage before receiving
+manylinux/musllinux wheel tags. Libraries requiring cgo need their own target build
+recipe. Use `--targets linux-amd64,darwin-arm64` to select fewer targets,
+`--output` to change the directory, and `--version 0.2.0` to override the manifest.
+
+Test locally with `pip install --find-links dist acme-greeter` or
+`npm install ./dist/npm/acme-greeter-0.1.0.tgz`. Then use your usual registry tools:
 
 ```sh
-go run ./cmd/gobridge build --typescript
-go run ./cmd/gobridge build --python --typescript
+python -m pip install twine
+python -m twine upload dist/*.whl
+npm publish ./dist/npm/acme-greeter-0.1.0.tgz --access public
 ```
 
-The builder reads `gobridge.json`, regenerates Go adapters, cross-compiles the
-command and generates bindings from its actual schema. It stages the matching
-runtime from the project's Go module version, so it also works outside this
-checkout without locating repository scripts. Wheels go to `dist/`; npm tarballs
-go to `dist/npm/`. `--output`, `--version`, and
-`--targets linux-amd64,darwin-arm64` override the defaults. All six targets are
-built by default; no language flag means Python.
+Configure [PyPI trusted publishing](https://docs.pypi.org/trusted-publishers/)
+and [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) in your own
+repository to publish from GitHub without ongoing API tokens. A first npm
+publication still needs an authenticated account. Package names are claimed on
+first successful publication, subject to registry rules.
 
-Python builds require Python 3.10+, setuptools and wheel. TypeScript builds also
-require Node 24+ and npm; the builder installs pinned compiler tools in temporary
-staging. Consumers need no compiler, Go toolchain or install script. Pip selects
-the matching wheel. An npm package contains its selected binaries under
-`_bin/<platform>-<arch>`:
+**Releasing gobridge itself:** versioning is coordinated across Go, Python, npm
+and the example. Normal merges update an automatic release PR. Merge that PR in
+GitHub to tag the Go module, build and test the release, and publish packages to
+PyPI/npm. See [maintainer release setup](CONTRIBUTING.md#releases-from-github) for
+the one-time registry connection and the GitHub UI retry path.
 
-```sh
-npm install --offline --ignore-scripts \
-  ./dist/npm/gobridge-runtime-0.1.0.tgz \
-  ./dist/npm/gobridge-greeter-example-0.1.0.tgz
-```
-
-Artifacts are local until you explicitly publish them to your registry. Linux
-wheels currently use generic `linux_*` tags for local/private distribution;
-public manylinux/musllinux certification is pending. Libraries requiring cgo
-need target C toolchains and a different recipe.
-
-For your own build system, generate bindings directly:
-
-```sh
-go build -o bin/greeter ./examples/greeter/cmd/greeter
-bin/greeter generate-python --class Greeter --binary greeter > greeter.py
-bin/greeter generate-typescript --class Greeter --binary greeter > greeter.ts
-```
-
-Windows uses `bin/greeter.exe`. Commit generated source and check drift in CI.
-The runtime checks that the executable's schema matches its bindings.
+For custom build systems, the executable also supports `generate-python` and
+`generate-typescript`. Generate from the same registry shipped in your binary;
+the runtime checks its schema against the generated bindings.
 
 ## 9. Embed only the daemon in Cobra
 

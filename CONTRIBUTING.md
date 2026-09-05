@@ -2,7 +2,7 @@
 
 The [README](README.md) is the single user guide. Keep examples progressive and
 put implementation notes here. Document APIs before implementing them, regenerate
-examples, and keep draft PR increments reviewable. No packages are released yet.
+examples, and keep draft PR increments reviewable. 
 
 ## Verify a change
 
@@ -81,9 +81,9 @@ optional dependencies. Reuse processes and batch useful work first.
 
 ## Before release
 
-- Certify Linux wheel tags and compatibility; expand native arm64 host coverage.
+- Expand native arm64 host and minimum OS coverage.
 - Add sustained load, protocol fuzzing, process-kill and free-threaded Python checks.
-- Add checksums/signing and reproducible versioned releases.
+- Extend reproducibility and signing checks beyond the release artifact manifest.
 - Define schema compatibility policy; exact fingerprints require regeneration.
 - Keep native Go, Python/Node APIs, Cobra and clean artifact installation green.
 
@@ -97,3 +97,63 @@ Primary references: [Python multiprocessing](https://docs.python.org/3/library/m
 [AsyncLocalStorage](https://nodejs.org/api/async_context.html),
 [exact JSON numbers](https://tc39.es/proposal-json-parse-with-source/),
 [Go cross-compilation](https://go.dev/doc/install/source#environment).
+
+## Releases from GitHub
+
+The release workflow uses [Release Please](https://github.com/googleapis/release-please-action)
+to maintain one version and changelog for the Go module, both `gobridge-runtime`
+packages, and `gobridge-greeter-example`. The `textkit` and `hello` fixtures stay CI
+artifacts; they are not published to registries.
+
+1. Use a squash-merge title such as `fix: ...` or `feat: ...`. Normal merges to
+   `main` create or refresh the release PR and its changelog. Before 1.0, breaking
+   changes (`feat!: ...`) bump the minor version and fixes bump the patch.
+2. Review and merge the release PR in GitHub. Automation creates `vX.Y.Z`, runs the
+   full CI matrix on that exact tag, and publishes tested artifacts. Normal merges
+   are accumulated; publishing happens when the release PR is merged.
+3. Find wheels, npm tarballs and SHA-256 checksums on the GitHub release. The
+   release notes link to the publishing workflow; a tag alone is not evidence
+   that registry uploads finished.
+4. If publishing failed, use **Actions → Release → Run workflow**, select `main`,
+   and enter the existing tag in `retry_tag`. This rebuilds and tests that exact
+   tag. Already-published files must match their recorded digest before a retry
+   can skip them. Never move a released tag or reuse a version for changed code.
+
+Release Please updates `version.txt`, Python/npm manifests, the npm lockfile and
+example settings together. CI rejects version drift and mismatched release tags.
+The author CLI reads the runtime version from the selected Go module's package
+metadata; application versions remain independent. No hard-coded runtime version
+is embedded in the wheel recipe.
+
+### One-time registry setup
+
+A maintainer needs PyPI and npm accounts with permission to publish these names.
+The registry lookups returned 404 for both names on both registries on 2026-09-05;
+that is not a reservation or a guarantee that a registry will accept the name.
+
+| Registry | Packages | Publisher settings |
+| --- | --- | --- |
+| PyPI | `gobridge-runtime`, `gobridge-greeter-example` | Owner `sambhav`, repository `gobridge`, workflow `release.yml`, environment `pypi` |
+| npm | `gobridge-runtime`, `gobridge-greeter-example` | Owner `sambhav`, repository `gobridge`, workflow `release.yml`, environment `npm`; allow direct `npm publish` |
+
+On [PyPI's publishing page](https://pypi.org/manage/account/publishing/), add a
+[pending publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
+for each new package. The first successful workflow upload creates it. No PyPI
+API token is required; pending publishers do not reserve package names.
+
+npm configures trusted publishers on existing packages. For first publication,
+create a short-lived npm token with permission to create/publish these packages,
+and save it as the GitHub **npm environment secret `NPM_TOKEN`**. After the first
+successful upload, configure the publisher in each package's npm settings with
+the table above, then remove that secret. Subsequent releases use OIDC. You can
+also bootstrap once from the release tarballs using an authenticated npm CLI.
+See [npm's current publisher requirements](https://docs.npmjs.com/trusted-publishers/).
+
+In **Settings → Actions → General**, allow GitHub Actions to create pull requests.
+The workflow explicitly dispatches CI for bot-created release PRs, so no personal
+GitHub token is required. Environments `pypi` and `npm` hold publishing identities;
+restrict them to `main` as appropriate for your repository policy. All publishing
+uses GitHub-hosted runners. PR checks build artifacts but never publish them.
+
+GitHub is the Go module host and release archive. PyPI and npm are the public
+language registries; there is no additional Go registry account to create.
