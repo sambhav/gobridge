@@ -1,6 +1,6 @@
 {
   "name": "gobridge-runtime",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Dependency-free Node runtime for typed Go library bindings",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,8 +11,14 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "LICENSE", "README.md"],
-  "engines": {"node": ">=24"},
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
