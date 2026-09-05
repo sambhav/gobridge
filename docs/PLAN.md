@@ -1,6 +1,6 @@
 # Implementation plan
 
-## Phase 1: Go, CLI and Python — this repository
+## Implemented: Go, CLI and Python
 
 - [x] Typed Go registry using generic registration and explicit adapters.
 - [x] JSON CLI, scalar/container flags, schema discovery and stdio daemon.
@@ -16,29 +16,27 @@
 - [x] Typed constructor options, scalar/void results and process-owned objects.
 - [x] Lazy importable functions, shared sync/async defaults and isolated scopes.
 - [x] Constructor failure, malformed protocol and in-flight-fork regression tests.
+- [x] Importable Go example library with a separate executable entrypoint.
+- [x] Per-operation CLI help, constructor discovery and strict metadata arguments.
+- [x] Shared Go field documentation/constraints in validation, CLI help and Python metadata.
+- [x] Nested JSON field discovery and exact int64 constraint values in CLI help.
 
 These checks denote implemented code, not a released compatibility guarantee.
 CI and the validation notes record which environments were actually tested.
 
-## Phase 2: harden the release boundary
+## Current gate: finish Go, CLI, Python and embedding
 
-1. Continue the passing Linux/macOS/Windows CI matrix for each increment; add
-   native arm64-host coverage beyond cross-compilation.
-2. Add protocol fuzzing, long-running stress/soak tests, process-kill matrices,
-   benchmarks and memory bounds under cancellation storms.
-3. Audit all inherited resource paths with platform experts; document supported
-   Python runtimes, especially free-threaded CPython and native extensions.
-4. Certify Linux wheel tags, sign/checksum release artifacts, test installation
-   on clean hosts, and automate reproducible versioned releases. Preserve the repository’s Apache-2.0 license in distributions.
-5. Stabilize schema evolution: today exact fingerprints require regeneration,
-   even for additive/documentation changes. Plan a compatibility negotiation
-   policy before committing to long-term version guarantees.
-6. Keep dataclasses as the dependency-free default. Consider an optional Pydantic
-   generator mode only after measuring validation and serialization costs.
-7. Add operation help/defaults/validation metadata and richer Python validation
-   only when it has one source of truth in the Go schema.
+- [ ] Finish and test embedding inside an existing CLI, including Cobra, with
+  clear stream/argument ownership and no unexpected exits or constructor calls.
+- [ ] Keep the complete Linux/macOS/Windows matrix green for the final combined
+  changes, including native Go use, source generation, Python multiprocessing,
+  metadata, help, and clean bundled-wheel installs.
+- [ ] Verify the user-facing examples and documentation against that revision.
 
-## Phase 3: TypeScript
+Each feature is documented first, then implemented and pushed as its own
+reviewable increment. TypeScript starts after this gate is complete.
+
+## Next: TypeScript
 
 Use the same versioned protocol and schema. Generate a client class with typed
 parameter objects, result interfaces and Promise-returning methods. Map
@@ -51,7 +49,21 @@ Resolve integer semantics before shipping: Go signed 64-bit values can exceed
 JavaScript's safe Number range. Define tagged decimal-string bigint fields or
 restrict the schema; never silently round. Python preserves JSON integer values.
 
-## Phase 4: opt-in richer resource models
+## Release hardening
+
+1. Add native arm64-host coverage beyond cross-compilation, plus sustained
+   cancellation/load tests, protocol fuzzing, and process-kill matrices.
+2. Document supported Python runtimes, especially free-threaded CPython and
+   interactions with native extensions and inherited resources.
+3. Certify Linux wheel tags, sign/checksum artifacts, and automate reproducible
+   versioned releases with the repository's Apache-2.0 license included.
+4. Define a schema compatibility policy before long-term version guarantees.
+   Current exact fingerprints require regeneration after metadata changes too.
+5. Add defaults or further validation only through one Go schema contract.
+   Keep dataclasses dependency-free; optional adapters need a concrete use case
+   and measured costs.
+
+## Later: opt-in resource models
 
 - Streaming with bounded flow control and backpressure, not unbounded events.
 - Go object handles only when users need multiple stateful instances inside
@@ -65,9 +77,9 @@ restrict the schema; never silently round. Python preserves JSON integer values.
 
 ## Definition of the first release
 
-A user can install a platform wheel into a clean Python environment, instantiate
-a generated class without finding a binary, use threads and asyncio, pass a
-client configuration into multiprocessing, receive useful errors/cancellation,
-and close everything without leaking daemon processes. The same Go operations
-work through the CLI. Documented OS tests and packaging gates must pass before
-tagging that release.
+A user can import the native Go library, install a platform wheel into a clean
+Python environment, call an imported function or instantiate a configured class
+without finding a binary, use threads and asyncio, and pass client configuration
+into multiprocessing. Errors and cancellation behave predictably, and shutdown
+reaps daemons. The same Go operations work through the standalone or embedded
+CLI. Documented OS tests and packaging gates must pass before tagging a release.

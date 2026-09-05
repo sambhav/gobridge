@@ -1,192 +1,120 @@
 # gobridge
 
-Write operations in Go. Expose them as a CLI and typed Python functions and
-classes, backed by a private Go daemon. TypeScript bindings are planned.
+Keep your library in Go. Generate a CLI and typed Python functions and classes,
+with the Go binary bundled inside a platform wheel. TypeScript comes next after
+the Go, CLI, Python, and CLI-embedding workflow is fully tested.
 
-This is an initial implementation, not a released package. Neither the Go
-module nor the Python package has been tagged or published to a registry.
+**Development preview:** no Go version tags or Python packages have been
+published. Build and use the examples from this checkout.
 
-Start with the [Hello World tutorial](docs/HELLO_WORLD.md): expose an ordinary
-Go function, call it from the CLI and Python, share a Go cache across concurrent
-calls, and package a cross-compiled binary inside a Python wheel.
-
-## Python usage
-
-The example bindings are generated from Go types. Results are dataclasses,
-functions and methods have real signatures, and errors are Python exceptions.
-
-```python
-from textkit import analyze, aio
-
-print(analyze(text="Hello from Go").words)  # 3
-
-async def example():
-    return (await aio.analyze(text="Hello asynchronously")).words
-```
-
-A packaged wheel includes the right Go binary. Importing starts no process;
-the first call lazily starts one default daemon for this module in the Python
-process. Sync and async module functions reuse it. For development, call
-`textkit.control.configure(command="./bin/textkit")` before using the default.
-`textkit.control.close()` resets it explicitly.
-
-Create instances when you want separately owned state:
-
-```python
-from textkit import TextKit, AsyncTextKit
-
-# A packaged wheel includes the right Go binary for the host.
-with TextKit() as kit:
-    result = kit.analyze(text="Hello from Go")
-    print(result.words)  # 3
-
-async def example():
-    async with AsyncTextKit() as kit:
-        result = await kit.analyze(text="Hello asynchronously")
-        await kit.wait(milliseconds=50, _timeout=1)
-        return result.words
-```
-
-For development, pass `TextKit("./bin/textkit")`. Construction is lazy;
-entering the context or making the first call starts the daemon. Keep a client
-alive to reuse the Go cache. Use context managers or `close()` / `aclose()`.
-Garbage collection and normal interpreter exit also attempt cleanup.
-
-## Define an operation once
+## Ordinary Go functions become ordinary Python functions
 
 ```go
-type AnalyzeInput struct {
-    Text string `json:"text"`
-}
-type Analysis struct {
-    Words int `json:"words"`
-}
-
-func main() {
-    r := gobridge.New()
-    err := gobridge.Register(r, "analyze", "Count words.",
-        func(ctx context.Context, in AnalyzeInput) (Analysis, error) {
-            return Analysis{Words: len(strings.Fields(in.Text))}, nil
-        })
-    if err != nil { panic(err) }
-    r.Main()
-}
+//gobridge:export
+func Greet(name string) string { return "Hello, " + name + "!" }
 ```
 
-See [`examples/textkit/main.go`](examples/textkit/main.go) for the complete
-program, including an optional Go TTL/LRU cache. Wrapping an existing Go
-library requires a small typed adapter; it does not rewrite that library.
+The generated Python package exposes the matching function:
 
-The same binary exposes:
+```python
+from annotated import greet
 
-```sh
-textkit analyze --text "hello world"
-textkit analyze --json '{"text":"hello world"}'
-textkit analyze --json - < input.json
-textkit schema
-textkit generate-python --class TextKit --binary textkit > textkit.py
-textkit serve --max-concurrency 64
+print(greet(name="World"))  # Hello, World!
 ```
 
-CLI string flags accept plain text; numbers, booleans, nullable pointers and
-containers accept JSON literals. The initial CLI supports `--field value`
-pairs; help lists operation descriptions and `schema` describes their fields.
+Go callers import the library and call `Greet` directly. Python starts the
+bundled executable on its first call and reuses a private daemon. Importing
+starts no process; a packaged wheel needs no Go installation or executable path.
 
-## Ownership and concurrency
+Constructors and instance methods preserve real Go state:
 
-| Caller | Connection and daemon | Go state/cache |
-| --- | --- | --- |
-| Module functions and `aio` in one Python process | One lazy default per generated module | Shared |
-| Threads sharing one client | One multiplexed stdio connection | Shared |
-| Async tasks sharing one client | Same connection; no event-loop-owned transport | Shared |
-| Different clients in one process | Separate connections and daemons | Isolated |
-| `control.scope(...)` / `async with control.scope(...)` | Separate client for the current context | Isolated; previous client restored on exit |
-| Pickled client sent with spawn/forkserver | New connection and daemon on first use | Fresh |
-| Inherited client after fork | Child closes inherited pipe copies, resets local transport | Fresh; parent remains usable |
+```python
+from annotated import Greeter
 
-There is no global daemon and no socket path. Stdio means **two anonymous
-pipes**, not a Unix-domain socket. That avoids port selection, Unix socket
-availability, Windows named-pipe differences, authentication tokens and stale
-socket files. Requests carry IDs, so responses can arrive out of order.
+with Greeter(prefix="Hey, ") as greeter:
+    print(greeter.welcome(name="Sam"))  # Hey, Sam
+    print(greeter.stats().calls)       # 1
+    greeter.reset()
+    assert greeter.stats().calls == 0
+```
 
-Python's `spawn` and `forkserver` are preferable to forking an application
-with active threads. The runtime resets its own inherited state; it cannot
-make arbitrary third-party locks or native runtimes fork-safe. It never
-changes your multiprocessing start method. See the [Python multiprocessing
-documentation](https://docs.python.org/3/library/multiprocessing.html).
+`prefix` comes from the Go constructor's options struct. Each instance owns a
+separate daemon and Go object. Methods have real signatures; model results are
+lightweight dataclasses. The runtimes have no mandatory Pydantic dependency.
+Async code can use `await aio.greet(...)` or an explicit `AsyncGreeter` instance.
 
-`Memo` in Go offers bounded TTL/LRU caching and per-key request coalescing.
-One cancelled caller does not cancel other callers waiting on the same work;
-the last departing waiter cancels the loader. Cache keys must capture all
-inputs and identity boundaries. Values must be immutable or copied by callers.
-Only use caching for appropriate pure operations; it is never automatic.
+## Run it from a checkout
 
-## Failure behavior
-
-- Individual timeouts and async cancellation send cancellation to Go contexts.
-  Handlers must cooperate. `close()` stops the private daemon and fails pending
-  calls; it is an abort, not a drain.
-- Requests are bounded by a local pending limit, a bounded writer queue,
-  a daemon concurrency limit, and a 1 MiB frame limit. Overload fails promptly.
-- A dedicated writer thread keeps pipe backpressure off caller/event-loop
-  threads. Cold startup runs off the event loop for async calls.
-- EOF cancels Go work and ends the daemon. Handler panics become errors.
-- A crashed daemon fails pending calls. It is **not restarted automatically**;
-  create a fresh client to explicitly accept new Go state. Operations are
-  never replayed automatically; an interrupted mutation may have completed.
-- Bindings verify protocol version and an exact schema fingerprint on startup.
-- Stdout is reserved for protocol frames. Go logging belongs on stderr.
-
-## Develop and verify
-
-Go 1.23+ and Python 3.10+ are required. Both runtime implementations use only
-their standard libraries. Packaging uses setuptools and wheel.
+Requires Go 1.23+ and Python 3.10+. From the repository root in a POSIX shell:
 
 ```sh
-go build -o bin/textkit ./examples/textkit
-./bin/textkit generate-python --class TextKit --binary textkit > examples/textkit/textkit.py
+go generate ./examples/annotated
+go build -o bin/annotated ./examples/annotated/cmd/annotated
+./bin/annotated generate-python --class Greeter --binary annotated > examples/annotated/annotated.py
 python -m pip install -e "./python[dev]"
-PYTHONPATH=examples/textkit python -c 'from textkit import TextKit; k=TextKit("./bin/textkit"); print(k.analyze(text="hello")); k.close()'
+PYTHONPATH=examples/annotated python -c 'from annotated import control, greet; control.configure(command="./bin/annotated"); print(greet(name="World")); control.close()'
+```
+
+Development uses `control.configure(command=...)` for module functions or
+`Greeter("./bin/annotated", prefix="Hey, ")` for an explicit instance. Installed
+wheels locate their package-data executable automatically.
+
+Use the same operations from the CLI:
+
+```sh
+./bin/annotated greet --name World
+./bin/annotated welcome --help
+./bin/annotated --config '{"prefix":"Hey, "}' welcome --name Sam
+```
+
+Help shows types, required/optional fields, documentation, validation limits,
+and constructor options. Operation stdout is JSON; errors go to stderr.
+
+Run the portable verification entrypoint, including on Windows:
+
+```sh
 python tools/check.py
 ```
 
-`tools/check.py` is portable, builds the examples, checks generated-file drift,
-runs Go tests with the race detector and vet, and runs pytest/pytest-asyncio integration
-tests against actual subprocesses. CI covers Linux, macOS and Windows and
-Python 3.10, 3.12 and 3.14, plus the minimum Go version.
+It builds the examples, verifies generated files, runs Go race tests and vet,
+and executes pytest against actual subprocesses. Windows manual commands use
+`bin/annotated.exe`. CI exercises Linux, macOS, Windows, supported Python
+versions, minimum Go, and clean platform-wheel installations.
 
-## Package binaries with Python
+## Ownership and performance
 
-```sh
-python -m pip install setuptools wheel
-python tools/build_wheels.py --targets linux-amd64
-python -m pip install --no-index --find-links dist gobridge-textkit-example
-python -c 'from textkit import TextKit; k=TextKit(); print(k.analyze(text="no Go installation needed")); k.close()'
-```
+| Usage | Go state |
+| --- | --- |
+| Module functions and `aio` | One lazy default per generated module per Python process |
+| Threads/tasks sharing a client | Shared daemon and state |
+| Separate client instances | Separate daemons and objects |
+| `control.scope(...)` | Isolated state; previous client restored on exit |
+| Multiprocessing workers | Fresh connections and state; parent's daemon stays owned by the parent |
 
-The packaging recipe produces a pure-Python runtime wheel and platform wheels
-for the generated example package. Users need Python, not a Go toolchain.
-Adapt the recipe to your library. It does not upload to PyPI. Supported build
-targets are Linux, macOS and Windows on amd64 and arm64. Linux wheels currently
-use `linux_*` tags for direct/private distribution, **not manylinux/musllinux
-certification for public PyPI**. Public distribution is a follow-up gate.
+Requests are multiplexed over anonymous stdio pipes, with bounded admission,
+cooperative cancellation, explicit shutdown, and schema checks. Crashes fail
+pending calls; operations are never automatically replayed. Prefer `spawn` or
+`forkserver` when other libraries have active threads.
 
-The recipe uses `CGO_ENABLED=0`. Cross-compilation works for compatible Go
-dependencies; libraries requiring cgo need target C toolchains and additional
-packaging work. See [Go's target/build environment
-documentation](https://go.dev/doc/install/source#environment).
+Go owns the work and reusable state. The optional `Memo` cache provides bounded
+TTL/LRU storage and per-key request coalescing. Keep clients alive to amortize
+startup; IPC is intended for useful library operations. See the
+[measurements](docs/PERFORMANCE.md) and [lifecycle design](docs/ARCHITECTURE.md).
 
-## Wire types and current scope
+## Guides
 
-Supported: named structs with explicit JSON tags; strings, booleans, signed
-integers, floats, nested structs, pointers, slices and string-keyed maps.
-Pointers map to `T | None`. Nil maps/slices map to `None`. Other fields are
-required. Unknown fields and invalid scalar types are rejected in Go.
-Names must be Python-safe. Recursive structs, embedded fields, unsigned
-integers, `[]byte`, interfaces and custom JSON encoders need explicit adapters.
+| You want to… | Start here |
+| --- | --- |
+| Import the library directly from Go | [Native Go usage](docs/GO_CONSUMER.md) |
+| Expose your existing functions and methods | [Source annotations](docs/SOURCE_GENERATION.md), [Go registration API](docs/GO_API.md) |
+| Use generated Python functions and classes | [Hello World](docs/HELLO_WORLD.md), [Python ownership and controls](docs/API_DESIGN.md) |
+| Explore CLI flags and JSON configuration | [CLI guide](docs/CLI.md) |
+| Add the bridge to an existing CLI or Cobra app | [Embedding guide](docs/EMBEDDING.md) |
+| Declare shared docs and validation | [Field metadata](docs/FIELD_METADATA.md) |
+| Bundle a cross-compiled binary in Python | [Wheel packaging](docs/HELLO_WORLD.md#7-ship-the-binary-as-python-package-data) |
+| Follow remaining work | [Implementation plan](docs/PLAN.md) |
 
-This version supports unary operation methods and per-client Go state.
-Streaming, persistent remote object handles, shared daemons, disk caches,
-TypeScript generation and public release automation are documented in
-[`docs/PLAN.md`](docs/PLAN.md). See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-for the transport and lifecycle decisions.
+The wheel recipe targets Linux, macOS and Windows on amd64/arm64 with
+`CGO_ENABLED=0`. Libraries using cgo need target C toolchains. Linux wheels use
+`linux_*` tags for local/private distribution; public manylinux/musllinux
+compatibility and release automation remain planned work.

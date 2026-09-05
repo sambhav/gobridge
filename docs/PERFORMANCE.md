@@ -29,6 +29,23 @@ Go-only samples: typed registry dispatch approximately 4.7 µs/op, 1,153 B and
 18 allocations; a cached `Memo.Get` approximately 103 ns/op with zero allocations.
 These are separate microbenchmarks and are not IPC throughput figures.
 
+## Later development sample (2026-09-05)
+
+A later 1,000-call run on the same shared Linux x86_64 environment recorded:
+
+| Measurement | Median | p95 |
+| --- | ---: | ---: |
+| Sync raw round trip | 169.27 µs | 379.20 µs |
+| Sync typed round trip | 159.08 µs | 331.32 µs |
+| Async typed round trip | 314.23 µs | 535.18 µs |
+
+Cold startup was 19.57 ms; async concurrency 16 completed 5,020 calls/s.
+The separate Go `Bind` dispatch benchmark measured 7.623 µs/op, 1,281 B/op and
+20 allocations/op. `Memo` hits measured 107.4 ns/op with zero allocations.
+`Bind` and the earlier typed `Register` sample measure different dispatch paths.
+These samples describe observed behavior; differences between individual
+shared-host runs do not establish an improvement or regression.
+
 ## Reproduce
 
 ```sh
