@@ -199,6 +199,54 @@ def test_eof_fails_all_pending_requests_and_reaps_daemon(tmp_path):
         assert transport.proc.wait(timeout=2) == 0
 
 
+@pytest.mark.parametrize("drain", [True, False])
+def test_full_pipe_preserves_frames_cancellation_and_bounded_close(tmp_path, drain):
+    release = tmp_path / "release"
+    command = _peer(tmp_path, f"""
+        import json, sys, time
+        from pathlib import Path
+        hello = json.loads(sys.stdin.readline())
+        print(json.dumps({{"id": hello["id"], "result": {{"protocol": 1}}}}), flush=True)
+        deadline = time.monotonic() + 10
+        while not Path({str(release)!r}).exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        for line in sys.stdin:
+            request = json.loads(line)
+            if request["method"] == "$cancel":
+                continue
+            params = request["params"]
+            print(json.dumps({{"id": request["id"], "result": {{"index": params["index"], "size": len(params["data"])}}}}), flush=True)
+    """)
+    client = Client(command, max_pending=16).start()
+    transport = client._transport
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            submitted = pool.submit(lambda: [transport.submit("echo", {"index":i, "data":"x" * 196608}, 5)
+                                             for i in range(8)])
+            try:
+                pending = submitted.result(timeout=2)
+            finally:
+                # Also unblock an implementation regression before pool exit.
+                if submitted.done() is False:
+                    release.touch()
+        transport.cancel(pending[1][0])
+        assert pending[1][1].cancelled()
+        if drain:
+            release.touch()
+            for i, (_, future) in enumerate(pending):
+                if i != 1:
+                    assert future.result(timeout=5) == {"index":i, "size":196608}
+        client.close()
+        for i, (_, future) in enumerate(pending):
+            assert future.done()
+        assert transport.proc.poll() is not None
+        assert not transport.writer.is_alive()
+        assert not transport.reader.is_alive()
+    finally:
+        release.touch()
+        client.close()
+
+
 def test_concurrent_close_reaps_once_and_resolves_all_callers():
     client = TextKit(BINARY).start()
     transport = client._transport
