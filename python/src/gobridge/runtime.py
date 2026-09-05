@@ -76,6 +76,12 @@ class BridgeError(Exception):
         self.code, self.message = code, message
         super().__init__(f"{code}: {message}")
 
+    def __reduce__(self):
+        # Exception.args contains the formatted display string, whereas our
+        # constructor needs the two original wire fields. Preserve subclasses
+        # and ordinary exception attributes across multiprocessing/pickle.
+        return type(self), (self.code, self.message), self.__dict__
+
 
 class InvalidArgumentError(BridgeError):
     pass
