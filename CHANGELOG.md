@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/sambhav/gobridge/compare/v1.1.0...v1.2.0) (2026-09-06)
+
+
+### Features
+
+* support application prerelease versions for Python and npm ([#22](https://github.com/sambhav/gobridge/issues/22)) ([273fa4a](https://github.com/sambhav/gobridge/commit/273fa4a4e7f103553df34d2810eb26acefa77a72))
+
 ## [1.1.0](https://github.com/sambhav/gobridge/compare/v1.0.0...v1.1.0) (2026-09-05)
 
 
