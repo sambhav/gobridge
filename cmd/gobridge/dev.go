@@ -46,6 +46,7 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 	options := devOptions{project: p}
 	flags := flag.NewFlagSet("dev", flag.ContinueOnError)
 	flags.SetOutput(log)
+	flags.StringVar(&options.Version, "version", p.Version, "application package version")
 	moduleName := flags.String("module", "", "module name declared in Go comments or gobridge.json")
 	flags.StringVar(&options.output, "python", "", "generated Python package directory (default build/<package/path>)")
 	flags.BoolVar(&options.typescript, "typescript", false, "generate a local npm package and restart a Node application")
@@ -58,7 +59,7 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 		return err
 	}
 	if len(p.Modules) > 0 || *moduleName != "" {
-		modules, err := p.resolveModules()
+		modules, err := options.project.resolveModules()
 		if err != nil {
 			return err
 		}
@@ -69,7 +70,7 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 			if module.Name == *moduleName {
 				m := module
 				options.selectedModule = &m
-				options.project = m.project(p)
+				options.project = m.project(options.project)
 				break
 			}
 		}

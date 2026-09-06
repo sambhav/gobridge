@@ -35,9 +35,10 @@ def main():
         run("go", "mod", "tidy")
         run(cli, "dev", "--once")
         assert "Hello, World!" in run(sys.executable, "app.py", env=dict(os.environ, PYTHONPATH=str(project / "build"))).stdout
-        run(cli, "dev", "--typescript", "--once")
+        run(cli, "dev", "--typescript", "--once", "--version", "0.2.3")
         assert "Hello, World!" in run("node", "app.mts").stdout
         package = project / "node_modules/@acme/greeter"
+        assert json.loads((package / "package.json").read_text())["version"] == "0.2.3"
         previous = (package / "package.json").read_bytes()
         source = project / "bridge/greeter.go"
         original = source.read_text() + """

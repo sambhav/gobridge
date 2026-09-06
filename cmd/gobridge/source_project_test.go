@@ -10,7 +10,6 @@ func TestDiscoverSourceProject(t *testing.T) {
 	writeTestFile(t, "go.mod", "module example.test/sdk\n\ngo 1.23\n")
 	writeTestFile(t, "bridge/doc.go", `// Package bridge is the API.
 //gobridge:module acme.greeter
-//gobridge:version 1.2.3
 //gobridge:npm @acme/sdk
 package bridge
 `)
@@ -22,7 +21,7 @@ package bridge
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Name != "acme.greeter" || p.Version != "1.2.3" || p.NPMPackage != "@acme/sdk" || len(modules) != 1 || modules[0].Source != "./bridge" || modules[0].Command != "./cmd/bridge" || modules[0].TypeScript.Export != "." {
+	if p.Name != "acme.greeter" || p.Version != "0.1.0" || p.NPMPackage != "@acme/sdk" || len(modules) != 1 || modules[0].Source != "./bridge" || modules[0].Command != "./cmd/bridge" || modules[0].TypeScript.Export != "." {
 		t.Fatalf("bad defaults: %+v %+v", p, modules)
 	}
 	for _, path := range []string{"build/generated.go", "node_modules/dep/doc.go", "vendor/dep/doc.go", "nested/doc.go", "bridge/ignored_test.go"} {

@@ -106,7 +106,9 @@ func discoverProject() (project, error) {
 				m.Python.Package = value
 			case "ts-package":
 				m.TypeScript.Package = value
-			case "version", "distribution", "npm", "repository", "license", "python-requires", "npm-dependencies":
+			case "version":
+				return fmt.Errorf("%s: pass the application version with --version instead of a Go comment", path)
+			case "distribution", "npm", "repository", "license", "python-requires", "npm-dependencies":
 				if previous, ok := metadata[key]; ok && previous != value {
 					return fmt.Errorf("%s: conflicting distribution setting //gobridge:%s; declare it once or use the same value", path, key)
 				}
@@ -137,9 +139,6 @@ func discoverProject() (project, error) {
 	p.Name = p.Modules[0].Python.Module
 	if p.Name == "" {
 		p.Name = p.Modules[0].Name
-	}
-	if v := metadata["version"]; v != "" {
-		p.Version = v
 	}
 	p.PythonDistribution, p.NPMPackage = metadata["distribution"], metadata["npm"]
 	p.Repository, p.License = metadata["repository"], metadata["license"]

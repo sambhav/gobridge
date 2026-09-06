@@ -41,7 +41,6 @@ package; native Go callers continue using the ordinary Go API.
 ```go
 // Package bridge exposes our Go API.
 //gobridge:module acme.greeter
-//gobridge:version 0.1.0
 //gobridge:npm @acme/greeter
 package bridge
 
@@ -105,7 +104,6 @@ Keep bridge settings beside the Go API, in the comment immediately above
 ```go
 // Package bridge exposes our Go API.
 //gobridge:module acme.greeter
-//gobridge:version 0.1.0
 //gobridge:npm @acme/greeter
 package bridge
 ```
@@ -113,7 +111,10 @@ package bridge
 Only `module` is required. `dev` and `build` discover annotated packages beneath
 the current directory. The source directory is inferred; a library package named
 `bridge` uses `./cmd/bridge`, while an annotated `package main` uses itself.
-The version defaults to `0.1.0`. Python and npm distribution names default to the
+Pass the application version on the command line: `gobridge build --version 1.2.3`
+(or `gobridge dev --version 1.2.3`). It defaults to `0.1.0` unless an explicit JSON
+configuration supplies another default. CLI values take precedence and do not
+modify source or configuration files. Python and npm distribution names default to the
 module name with dots/underscores replaced by hyphens. A single module is the
 npm package's root export. Source annotations determine class, method and field
 names; consumers simply import and call the generated API.
@@ -142,7 +143,6 @@ want a specific npm subpath. No separate module mapping file is required.
 | `//gobridge:ts-export ./catalog` | Override the npm export path. |
 | `//gobridge:python-package ./python-package` | Handwritten Python wrappers/assets. |
 | `//gobridge:ts-package ./typescript-package` | Handwritten TypeScript wrappers/assets. |
-| `//gobridge:version 1.2.3` | Application version. |
 | `//gobridge:distribution acme-sdk` | pip/PyPI distribution name. |
 | `//gobridge:npm @acme/sdk` | npm package name. |
 | `//gobridge:repository https://github.com/acme/sdk` | Package repository metadata. |

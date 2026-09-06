@@ -29,12 +29,11 @@ def main():
         run("go", "mod", "tidy", cwd=project)
         target = run("go", "env", "GOOS").strip() + "-" + run("go", "env", "GOARCH").strip()
         source = project / "bridge/greeter.go"
-        source.write_text(source.read_text().replace("//gobridge:version 0.1.0", "//gobridge:version 1.2.3-alpha.0"))
+        original = source.read_text()
         for canonical, python_version in [("1.2.3-alpha.0", "1.2.3a0"), ("1.2.3-beta.1", "1.2.3b1"), ("1.2.3-rc.1", "1.2.3rc1")]:
-            # Alpha exercises package comments; beta/rc exercise the CLI override.
+            # CI supplies one version for both package ecosystems.
             args = ["--python", "--typescript", "--targets", target, "--output", str(root / canonical)]
-            if "alpha" not in canonical:
-                args += ["--version", canonical]
+            args += ["--version", canonical]
             plan = json.loads(run(cli, "build", *args, "--check", cwd=project))
             run(cli, "build", *args, cwd=project)
             dist = root / canonical
@@ -61,7 +60,7 @@ def main():
             assert installed["version"] == canonical
             assert "Hello, Sam!" in run("node", "--input-type=module", "-e", 'import {greet} from "@acme/greeter"; console.log(await greet({name:"Sam"}));', cwd=node)
             print("Built and installed", canonical, "as Python", python_version, "and npm", canonical, flush=True)
-        assert "//gobridge:version 1.2.3-alpha.0" in source.read_text()
+        assert source.read_text() == original
         # Let pip select among all three actual wheel versions, independent of
         # lexical filename order; prereleases require an explicit opt-in.
         selection = [python, "-m", "pip", "install", "--no-index", "--no-deps", "--ignore-installed", "--pre", "--target", root / "selected"]

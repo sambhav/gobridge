@@ -71,7 +71,7 @@ func runInit(args []string, log io.Writer) error {
 	if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~/-]*$`).MatchString(*modulePath) || strings.Contains(*modulePath, "..") {
 		return fmt.Errorf("invalid Go module path %q", *modulePath)
 	}
-	packageDoc := "// Package bridge exposes the Go API to Python and TypeScript.\n//\n//gobridge:module " + p.Name + "\n//gobridge:version " + p.Version + "\n"
+	packageDoc := "// Package bridge exposes the Go API to Python and TypeScript.\n//\n//gobridge:module " + p.Name + "\n"
 	if p.NPMPackage != p.distributionName() {
 		packageDoc += "//gobridge:npm " + p.NPMPackage + "\n"
 	}
