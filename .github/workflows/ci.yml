@@ -146,7 +146,6 @@ jobs:
         with:
           python-version: '3.12'
       - run: go test -run '^$' -bench . -benchmem > go-bench.txt
-      - run: python tools/benchmark.py --calls 1000 > python-bench.json
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -161,7 +160,6 @@ jobs:
           name: benchmarks
           path: |
             go-bench.txt
-            python-bench.json
             benchmark-results.json
             benchmark-results.md
   integration:

@@ -5,15 +5,15 @@ Generated packages bundle the Go executable and a private runtime. Calls reuse
 one local subprocess per client, keeping objects and caches alive between calls.
 
 This README is the complete user guide. [Contributing](CONTRIBUTING.md) covers
-maintainer workflows and internals; [benchmarks](docs/performance.md) record
-performance measurements and their reproduction commands.
+maintainer workflows, protocol internals, benchmarking and releases.
 
 [Quick start](#quick-start) · [Configuration](#configuration) ·
 [Names](#names-in-go-source) · [Constructors](#constructors-and-functional-options) ·
 [Build and publish](#build-and-publish) · [Development](#development) ·
 [State and sessions](#share-state-deliberately) · [Types](#types-validation-and-runtime-settings) ·
 [Streaming and batches](#streaming-and-batches) · [Errors and logging](#errors-and-observability) ·
-[Manual registration](#manual-registration) · [Migration](#breaking-api-changes)
+[Embedding](#embedded-generation-and-packaging) · [API checks](#api-snapshots-for-ci) ·
+[Manual registration](#manual-registration)
 
 ## Quick start
 
@@ -747,8 +747,8 @@ inherit stderr, so logs reach the parent application's normal logging destinatio
 
 Supported values are strings, booleans, signed/unsigned integers, finite floats,
 named structs, fixed arrays, slices, string-keyed maps and pointers. Struct fields need explicit
-`json` names. Pointer inputs are optional/nullable; slices/maps are required but
-can be null. Bytes, timestamps, and durations have the explicit codecs described
+`json` names. By default, pointer inputs are optional/nullable; slices/maps are required but
+can be null. The `required` and `nullable` tags below override these defaults. Bytes, timestamps, and durations have the explicit codecs described
 below. TypeScript omits absent optional properties. Recursive types, embedded
 struct fields, arbitrary interfaces, variadic functions and multiple non-error
 results still need explicit wrappers. Custom marshalers can opt in using
@@ -780,7 +780,7 @@ type Request struct {
 ```
 
 Bounds are inclusive; string lengths count Unicode code points. Length rules also
-apply to slices/maps. Constraints validate non-null values without changing
+apply to arrays, slices and maps. Constraints validate non-null values without changing
 nullability. Invalid tags fail registration. Go validates inputs for every
 transport; Python metadata and TypeScript JSDoc expose the same rules. Defaults
 belong in the Go constructor. Native callers retain the library's own validation.
@@ -806,7 +806,7 @@ results cannot repopulate invalidated entries. Cache keys must include all input
 and identity boundaries; caches live in the Go process and are not shared across
 client processes. Reuse clients and batch useful work to amortize IPC.
 
-For test commands, protocol details, measurements and release work, see
+For test commands, protocol details, benchmarking and release work, see
 [Contributing](CONTRIBUTING.md).
 
 
@@ -919,20 +919,10 @@ seconds. These codec kinds participate in the schema fingerprint.
 Other types with custom JSON or text marshalers must declare `GobridgeWireType`
 or use an explicit wrapper.
 
-## Breaking API changes
+## Upgrading
 
-The consolidated API removes overlapping entrypoints rather than keeping aliases:
-
-| Previous interface | Replacement |
-| --- | --- |
-| `NewObjectOptions(r, fn, ...)` | `NewObject(r, fn, ...)` for both constructor styles. |
-| Python runtime `AsyncClient` | `Client`, which supports sync calls and async `acall`/context management; generated `Greeter` and `SyncGreeter` remain distinct. |
-| `init --dry-run`, `build --dry-run` | `--check` on both commands. |
-| Flat manifest `name/source/command/class` | Entries in `modules`, with class names under the language settings. |
-| `python_distribution`, `python_requires` | `python.distribution`, `python.requires`. |
-| `npm_package`, `npm_dependencies` | `typescript.package`, `typescript.dependencies`. |
-| `python_package`, `typescript_package` | Each module's `python.package`, `typescript.package`. |
-| `build/dev --dir/--command/--name/--class` | Edit the module's manifest settings; dev selects with `--module`. |
-
-Create a manifest with `gobridge init` or the configuration example above. Regenerate
-Go adapters and rebuild Python/TypeScript packages together after upgrading.
+Regenerate Go adapters and rebuild Python/TypeScript packages together after
+upgrading GoBridge. Generated packages bundle their matching runtime; copying
+individual runtime files between versions is unsupported. Use API snapshots to
+review changes to your public bindings before publishing a new package version.
+Release history is in [CHANGELOG.md](CHANGELOG.md).

@@ -12,13 +12,13 @@ import (
 
 const MaxFrame = 1024 * 1024
 
-type Request struct {
+type request struct {
 	ID        string          `json:"id"`
 	Method    string          `json:"method"`
 	Params    json.RawMessage `json:"params"`
 	TimeoutMS int64           `json:"timeout_ms,omitempty"`
 }
-type Response struct {
+type response struct {
 	ID     string `json:"id"`
 	Result any    `json:"result,omitempty"`
 	Error  *Error `json:"error,omitempty"`
@@ -26,7 +26,7 @@ type Response struct {
 
 // A successful void operation must include result:null. Omitting it would make
 // the response indistinguishable from an invalid envelope to strict clients.
-func (r Response) MarshalJSON() ([]byte, error) {
+func (r response) MarshalJSON() ([]byte, error) {
 	if r.Error != nil {
 		return json.Marshal(struct {
 			ID    string `json:"id"`
@@ -52,12 +52,12 @@ func (r *Registry) Serve(parent context.Context, in io.Reader, out io.Writer, ma
 	defer streams.closeAll()
 	var mu, writeMu sync.Mutex
 	active := map[string]context.CancelFunc{}
-	write := func(resp Response) {
+	write := func(resp response) {
 		// MarshalJSON already produces validated JSON. Calling json.Marshal on
-		// Response would scan and copy that entire encoded payload a second time.
+		// response would scan and copy that entire encoded payload a second time.
 		data, err := resp.MarshalJSON()
 		if err != nil || len(data) > MaxFrame {
-			data, _ = (Response{ID: resp.ID, Error: &Error{Code: "resource_exhausted", Message: "response cannot be encoded within frame limit"}}).MarshalJSON()
+			data, _ = (response{ID: resp.ID, Error: &Error{Code: "resource_exhausted", Message: "response cannot be encoded within frame limit"}}).MarshalJSON()
 		}
 		writeMu.Lock()
 		defer writeMu.Unlock()
@@ -74,7 +74,7 @@ func (r *Registry) Serve(parent context.Context, in io.Reader, out io.Writer, ma
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		var req Request
+		var req request
 		if err := json.Unmarshal(scan.Bytes(), &req); err != nil {
 			return fmt.Errorf("invalid protocol frame: %w", err)
 		}
@@ -102,12 +102,12 @@ func (r *Registry) Serve(parent context.Context, in io.Reader, out io.Writer, ma
 		}
 		if len(active) >= maxConcurrent {
 			mu.Unlock()
-			write(Response{ID: req.ID, Error: &Error{Code: "busy", Message: "too many concurrent requests"}})
+			write(response{ID: req.ID, Error: &Error{Code: "busy", Message: "too many concurrent requests"}})
 			continue
 		}
 		if req.TimeoutMS < 0 || req.TimeoutMS > 86400000 {
 			mu.Unlock()
-			write(Response{ID: req.ID, Error: &Error{Code: "invalid_argument", Message: "timeout must be 0..86400000 ms"}})
+			write(response{ID: req.ID, Error: &Error{Code: "invalid_argument", Message: "timeout must be 0..86400000 ms"}})
 			continue
 		}
 		var callCtx context.Context
@@ -120,7 +120,7 @@ func (r *Registry) Serve(parent context.Context, in io.Reader, out io.Writer, ma
 		callCtx = context.WithValue(callCtx, requestIDKey{}, req.ID)
 		active[req.ID] = callCancel
 		mu.Unlock()
-		go func(req Request, c context.Context, stop context.CancelFunc) {
+		go func(req request, c context.Context, stop context.CancelFunc) {
 			defer stop()
 			var result any
 			var err error
@@ -142,7 +142,7 @@ func (r *Registry) Serve(parent context.Context, in io.Reader, out io.Writer, ma
 			} else {
 				result, err = r.Call(c, req.Method, req.Params)
 			}
-			resp := Response{ID: req.ID, Result: result}
+			resp := response{ID: req.ID, Result: result}
 			if err != nil {
 				resp.Result = nil
 				resp.Error = wireError(err)

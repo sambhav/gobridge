@@ -60,7 +60,7 @@ func startObjectServer(t *testing.T, r *Registry) *objectServerSession {
 	return &objectServerSession{t: t, encoder: json.NewEncoder(inW), responses: responses, readErrors: readErrors}
 }
 
-func (s *objectServerSession) send(req Request) {
+func (s *objectServerSession) send(req request) {
 	s.t.Helper()
 	if err := s.encoder.Encode(req); err != nil {
 		s.t.Fatalf("send %s: %v", req.Method, err)
@@ -109,7 +109,7 @@ func requireWireError(t *testing.T, response map[string]json.RawMessage, code st
 func TestServerObjectHandshakeAndInitializeOnce(t *testing.T) {
 	r, calls := newTestObject(t)
 	s := startObjectServer(t, r)
-	s.send(Request{ID: "hello", Method: "$hello"})
+	s.send(request{ID: "hello", Method: "$hello"})
 	response := s.read("hello")
 	var schema Schema
 	if err := json.Unmarshal(response["result"], &schema); err != nil {
@@ -121,23 +121,23 @@ func TestServerObjectHandshakeAndInitializeOnce(t *testing.T) {
 	if calls.Load() != 0 {
 		t.Fatal("hello invoked constructor")
 	}
-	s.send(Request{ID: "before", Method: "add", Params: json.RawMessage(`{"amount":1}`)})
+	s.send(request{ID: "before", Method: "add", Params: json.RawMessage(`{"amount":1}`)})
 	requireWireError(t, s.read("before"), "failed_precondition")
-	s.send(Request{ID: "init", Method: "$init", Params: json.RawMessage(`{"initial":10}`)})
+	s.send(request{ID: "init", Method: "$init", Params: json.RawMessage(`{"initial":10}`)})
 	requireWireSuccess(t, s.read("init"), "null")
 	if calls.Load() != 1 {
 		t.Fatal("constructor did not run once")
 	}
-	s.send(Request{ID: "add", Method: "add", Params: json.RawMessage(`{"amount":2}`)})
+	s.send(request{ID: "add", Method: "add", Params: json.RawMessage(`{"amount":2}`)})
 	requireWireSuccess(t, s.read("add"), "12")
-	s.send(Request{ID: "again", Method: "$init", Params: json.RawMessage(`{"initial":100}`)})
+	s.send(request{ID: "again", Method: "$init", Params: json.RawMessage(`{"initial":100}`)})
 	requireWireError(t, s.read("again"), "failed_precondition")
-	s.send(Request{ID: "unchanged", Method: "add", Params: json.RawMessage(`{"amount":1}`)})
+	s.send(request{ID: "unchanged", Method: "add", Params: json.RawMessage(`{"amount":1}`)})
 	requireWireSuccess(t, s.read("unchanged"), "13")
 	if calls.Load() != 1 {
 		t.Fatal("repeated init reconstructed receiver")
 	}
-	s.send(Request{ID: "hello_again", Method: "$hello"})
+	s.send(request{ID: "hello_again", Method: "$hello"})
 	response = s.read("hello_again")
 	var after Schema
 	if err := json.Unmarshal(response["result"], &after); err != nil || after.Hash != schema.Hash {
@@ -173,7 +173,7 @@ func TestServerConstructorFailuresAndDeadline(t *testing.T) {
 				t.Fatal(err)
 			}
 			s := startObjectServer(t, r)
-			s.send(Request{ID: "init", Method: "$init", Params: json.RawMessage(tc.params), TimeoutMS: tc.timeout})
+			s.send(request{ID: "init", Method: "$init", Params: json.RawMessage(tc.params), TimeoutMS: tc.timeout})
 			response := s.read("init")
 			requireWireError(t, response, tc.code)
 			if tc.name == "panic" {
@@ -183,9 +183,9 @@ func TestServerConstructorFailuresAndDeadline(t *testing.T) {
 					t.Fatalf("panic detail leaked: %s", failure.Message)
 				}
 			}
-			s.send(Request{ID: "add", Method: "add", Params: json.RawMessage(`{"amount":1}`)})
+			s.send(request{ID: "add", Method: "add", Params: json.RawMessage(`{"amount":1}`)})
 			requireWireError(t, s.read("add"), "failed_precondition")
-			s.send(Request{ID: "retry", Method: "$init", Params: json.RawMessage(`{"initial":0}`)})
+			s.send(request{ID: "retry", Method: "$init", Params: json.RawMessage(`{"initial":0}`)})
 			requireWireError(t, s.read("retry"), "failed_precondition")
 		})
 	}
@@ -205,13 +205,13 @@ func TestServerConstructorCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := startObjectServer(t, r)
-	s.send(Request{ID: "init", Method: "$init", Params: json.RawMessage(`{"initial":0}`)})
+	s.send(request{ID: "init", Method: "$init", Params: json.RawMessage(`{"initial":0}`)})
 	select {
 	case <-started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("constructor did not start")
 	}
-	s.send(Request{Method: "$cancel", Params: json.RawMessage(`{"id":"init"}`)})
+	s.send(request{Method: "$cancel", Params: json.RawMessage(`{"id":"init"}`)})
 	requireWireError(t, s.read("init"), "cancelled")
 	if calls.Load() != 1 || !r.NeedsInit() {
 		t.Fatal("cancelled constructor was marked successful")
@@ -245,7 +245,7 @@ func TestServerSuccessfulScalarAndVoidEnvelopes(t *testing.T) {
 	}
 	s := startObjectServer(t, r)
 	for _, tc := range cases {
-		s.send(Request{ID: tc.name, Method: tc.name, Params: json.RawMessage(`{}`)})
+		s.send(request{ID: tc.name, Method: tc.name, Params: json.RawMessage(`{}`)})
 		requireWireSuccess(t, s.read(tc.name), tc.want)
 	}
 }
