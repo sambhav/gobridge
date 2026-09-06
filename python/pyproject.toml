@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gobridge-runtime"
-version = "1.2.0"
+version = "2.0.0"
 description = "Process-owned Python bindings for typed Go operations"
 readme = "README.md"
 requires-python = ">=3.10"
