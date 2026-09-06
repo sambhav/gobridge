@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0",
+  "python": {"distribution": "gobridge-multi-example"},
+  "typescript": {"package": "gobridge-multi-example"},
+  "modules": [
+    {
+      "name": "catalog",
+      "source": "../catalog",
+      "command": "../catalog/cmd/catalog",
+      "python": {"module": "acme.catalog"},
+      "typescript": {"export": "./catalog"}
+    },
+    {
+      "name": "text",
+      "source": "../greeter",
+      "command": "../greeter/cmd/greeter",
+      "python": {"module": "acme.text", "class": "TextTools"},
+      "typescript": {"export": "./text", "class": "TextTools"}
+    }
+  ]
+}

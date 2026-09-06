@@ -24,18 +24,19 @@ def main():
         project.mkdir()
         guide = (ROOT / "README.md").read_text()
         go_blocks = re.findall(r"```go\n(.*?)```", guide, re.S)
-        library_source = next(b for b in go_blocks if b.startswith("package greeter\n"))
+        library_source = next(b for b in go_blocks if b.startswith("package bridge\n"))
         command_source = next(b for b in go_blocks if b.startswith("package main\n"))
-        options_source = next(b for b in go_blocks if b.startswith("type Options struct"))
+        options_source = next(b for b in go_blocks if b.startswith("type Config struct"))
         (project / "go.mod").write_text(
             'module example.com/greeter\n\ngo 1.23\n\nrequire github.com/sambhav/gobridge v0.0.0\n'
             + 'replace github.com/sambhav/gobridge => ' + json.dumps(ROOT.as_posix()) + '\n'
         )
-        (project / "greeter.go").write_text(library_source + "\n" + options_source)
+        (project / "bridge").mkdir()
+        (project / "bridge" / "greeter.go").write_text(library_source + "\n" + options_source)
         command = project / "cmd" / "greeter"
         command.mkdir(parents=True)
         (command / "main.go").write_text(command_source)
-        (project / "gobridge.json").write_text(json.dumps({"name": "greeter", "source": ".", "command": "./cmd/greeter"}))
+        (project / "gobridge.json").write_text(json.dumps({"python":{"distribution":"greeter"},"typescript":{"package":"greeter"},"modules":[{"name": "greeter", "python":{"module":"acme.greeter"}, "source": "./bridge", "command": "./cmd/greeter", "typescript":{"export":"."}}]}))
         goos = subprocess.check_output(["go", "env", "GOOS"], text=True).strip()
         goarch = subprocess.check_output(["go", "env", "GOARCH"], text=True).strip()
         subprocess.run([str(cli), "build", "--python", "--typescript", "--targets", goos + "-" + goarch,
@@ -46,8 +47,8 @@ def main():
             metadata = archive.read("greeter-0.2.3.dist-info/METADATA").decode()
             assert "Version: 0.2.3" in metadata
             assert "Requires-Dist:" not in metadata
-            assert "greeter/_gobridge/runtime.py" in archive.namelist()
-            assert "greeter/_gobridge/LICENSE" in archive.namelist()
+            assert "acme/greeter/_gobridge/runtime.py" in archive.namelist()
+            assert "acme/greeter/_gobridge/LICENSE" in archive.namelist()
         env = root / "consumer"
         venv.EnvBuilder(with_pip=True).create(env)
         python = env / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -59,7 +60,7 @@ def main():
                                          env=dict(os.environ, PYTHONPATH=str(project / "build")))
         assert result.strip() == "Hello, World!"
         subprocess.run([str(python), "-m", "pip", "install", "--no-index", "--find-links", str(dist), "greeter==0.2.3"], check=True)
-        subprocess.run([str(python), "-c", 'import asyncio; from greeter import greet, greet_sync; assert asyncio.run(greet(name="World")) == "Hello, World!"; assert greet_sync(name="Sam") == "Hello, Sam!"'],
+        subprocess.run([str(python), "-c", 'import asyncio; from acme.greeter import greet, greet_sync; assert asyncio.run(greet(name="World")) == "Hello, World!"; assert greet_sync(name="Sam") == "Hello, Sam!"'],
                        cwd=root, env={k:v for k,v in os.environ.items() if k!="PYTHONPATH"}, check=True)
         node = root / "node-consumer"
         node.mkdir()
@@ -78,8 +79,7 @@ def main():
         assert len(list((project / "app-only").glob("*.whl"))) == 1
         # Separate distributions share native namespace parents, including after uninstall.
         for leaf in ("greeter", "farewell"):
-            manifest = {"name": "acme.tools." + leaf, "source": ".", "command": "./cmd/greeter",
-                        "npm_package": "@acme/" + leaf}
+            manifest = {"typescript":{"package":"@acme/"+leaf}, "modules":[{"name": "acme.tools." + leaf, "source": "./bridge", "command": "./cmd/greeter", "typescript":{"export":"."}}]}
             (project / "gobridge.json").write_text(json.dumps(manifest))
             languages = ["--python", "--typescript"] if leaf == "greeter" else ["--python"]
             subprocess.run([str(cli), "build", *languages, "--targets", goos + "-" + goarch,

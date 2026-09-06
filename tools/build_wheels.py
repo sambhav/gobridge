@@ -4,6 +4,7 @@ Pass --go-package, --package, --class, --binary and --distribution to wrap your
 own Go library. Defaults build the greeter example. No package is uploaded.
 """
 import argparse
+import json
 import keyword
 import os
 from pathlib import Path
@@ -95,6 +96,7 @@ def write_wheel(stage, package, distribution, version, tag, output, repository, 
 def main():
     global PROJECT
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--modules", type=Path, help="resolved module manifest from gobridge build")
     parser.add_argument("--targets", nargs="+", choices=TARGETS, default=list(TARGETS))
     parser.add_argument("--build-cache", type=Path, help="reuse Go link outputs; Go still checks sources and flags")
     parser.add_argument("--go-package", default="./examples/greeter/cmd/greeter", help="Go command package to build")
@@ -112,7 +114,7 @@ def main():
     parts = args.package.split(".")
     if any(not re.fullmatch(r"[a-z][a-z0-9_]*", part) or keyword.iskeyword(part) for part in parts):
         parser.error("--package must be dot-separated lowercase Python package identifiers")
-    if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", args.client_class):
+    if not re.fullmatch(r"[A-Z][A-Za-z0-9_]*", args.client_class):
         parser.error("--class must be a capitalized Python class identifier")
     if not re.fullmatch(r"[A-Za-z0-9_-]+", args.binary):
         parser.error("--binary must be a filename stem using letters, digits, _ or -")
@@ -127,36 +129,48 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="gobridge-wheels-") as tmp:
         temp = Path(tmp)
-        host = temp / (args.binary + (".exe" if os.name == "nt" else ""))
-        host_env = {key: value for key, value in os.environ.items() if key not in {"GOOS", "GOARCH"}}
-        host_env["CGO_ENABLED"] = "0"
-        build_go_binary(host, args.go_package, PROJECT, host_env, cache=args.build_cache)
-        host.chmod(0o755)
-        bindings = subprocess.check_output([str(host), "generate-python", "--class", args.client_class, "--binary", args.binary])
+        modules = json.loads(args.modules.read_text()) if args.modules else [{
+            "command": args.go_package, "binary": args.binary,
+            "python": {"module": args.package, "class": args.client_class},
+        }]
+        prepared = []
+        for index, module in enumerate(modules):
+            target_config = module["python"]
+            host = temp / (f"host{index}" + (".exe" if os.name == "nt" else ""))
+            host_env = {key: value for key, value in os.environ.items() if key not in {"GOOS", "GOARCH"}}
+            host_env["CGO_ENABLED"] = "0"
+            build_go_binary(host, module["command"], PROJECT, host_env, cache=args.build_cache)
+            host.chmod(0o755)
+            bindings = subprocess.check_output([str(host), "generate-python", "--class", target_config["class"],
+                "--binary", module["binary"], "--names", json.dumps(target_config.get("rename", {}))])
+            prepared.append((module, bindings))
         for target in args.targets:
             goos, goarch, tag = TARGETS[target]
             stage = temp / target
-            package = stage.joinpath(*parts)
-            # PEP 420 parents intentionally have no __init__.py or py.typed.
-            binary_dir = package / "_bin"
-            binary_dir.mkdir(parents=True)
-            private = package / "_gobridge"
-            shutil.copytree(ROOT / "python/src/gobridge", private, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-            shutil.copyfile(ROOT / "LICENSE", private / "LICENSE")
-            source = bindings.decode().replace("\nfrom gobridge", "\nfrom ._gobridge")
-            if copy_package(PROJECT, "python", package):
-                (package / "_bindings.py").write_text(source, encoding="utf-8")
-                if not (package / "__init__.py").exists():
-                    (package / "__init__.py").write_text("from ._bindings import *\n")
-            else:
-                (package / "__init__.py").write_text(source, encoding="utf-8")
-            (package / "py.typed").write_text("")
-            binary = binary_dir / (args.binary + (".exe" if goos == "windows" else ""))
-            env = dict(os.environ, GOOS=goos, GOARCH=goarch, CGO_ENABLED="0")
-            build_go_binary(binary, args.go_package, PROJECT, env, cache=args.build_cache, trimpath=True)
-            binary.chmod(0o755)
-            if goos == "linux":
-                validate_static_linux(binary, goarch)
+            for module, bindings in prepared:
+                package = stage.joinpath(*module["python"]["module"].split("."))
+                if (package / "__init__.py").exists() or (package / "_bindings.py").exists():
+                    raise ValueError(f"module collides with package additions: {module['python']['module']}")
+                # PEP 420 parents intentionally have no __init__.py or py.typed.
+                binary_dir = package / "_bin"
+                binary_dir.mkdir(parents=True)
+                private = package / "_gobridge"
+                shutil.copytree(ROOT / "python/src/gobridge", private, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+                shutil.copyfile(ROOT / "LICENSE", private / "LICENSE")
+                source = bindings.decode().replace("\nfrom gobridge", "\nfrom ._gobridge")
+                if copy_package(PROJECT, module["python"].get("package", ""), package):
+                    (package / "_bindings.py").write_text(source, encoding="utf-8")
+                    if not (package / "__init__.py").exists():
+                        (package / "__init__.py").write_text("from ._bindings import *\n")
+                else:
+                    (package / "__init__.py").write_text(source, encoding="utf-8")
+                (package / "py.typed").write_text("")
+                binary = binary_dir / (module["binary"] + (".exe" if goos == "windows" else ""))
+                env = dict(os.environ, GOOS=goos, GOARCH=goarch, CGO_ENABLED="0")
+                build_go_binary(binary, module["command"], PROJECT, env, cache=args.build_cache, trimpath=True)
+                binary.chmod(0o755)
+                if goos == "linux":
+                    validate_static_linux(binary, goarch)
             write_wheel(stage, args.package, args.distribution, version, tag, output,
                         args.repository, args.license, PROJECT)
             print("Built", target, flush=True)

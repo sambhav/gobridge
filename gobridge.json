@@ -1,11 +1,26 @@
 {
-  "name": "greeter",
-  "class": "Greeter",
-  "source": "./examples/greeter",
-  "command": "./examples/greeter/cmd/greeter",
   "version": "1.2.0",
-  "python_distribution": "gobridge-greeter-example",
-  "npm_package": "gobridge-greeter-example",
   "repository": "https://github.com/sambhav/gobridge",
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "python": {
+    "distribution": "gobridge-greeter-example"
+  },
+  "typescript": {
+    "package": "gobridge-greeter-example"
+  },
+  "modules": [
+    {
+      "name": "greeter",
+      "source": "./examples/greeter",
+      "command": "./examples/greeter/cmd/greeter",
+      "python": {
+        "module": "greeter",
+        "class": "Greeter"
+      },
+      "typescript": {
+        "export": ".",
+        "class": "Greeter"
+      }
+    }
+  ]
 }

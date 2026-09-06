@@ -122,7 +122,7 @@ func tsFields(b *strings.Builder, fields []Field) {
 		if field.Type.Kind == "ptr" {
 			optional = "?"
 		}
-		fmt.Fprintf(b, "  readonly %s%s: %s;\n", tsCamel(field.Name), optional, tsType(field.Type))
+		fmt.Fprintf(b, "  readonly %s%s: %s;\n", tsFieldName(field), optional, tsType(field.Type))
 	}
 }
 
@@ -138,8 +138,12 @@ func tsRequired(fields []Field) bool {
 // GenerateTypeScript emits ESM bindings with concrete readonly models, exact
 // int64 bigint types, lazy instance/module clients, and separate runtime options.
 // The matching package runtime is gobridge-runtime (Node.js 24 and newer).
-func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string) error {
-	if !regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`).MatchString(class) || typescriptReserved[class] {
+func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string, options ...Option) error {
+	schema, class, err := r.bindingSchema("typescript", class, options)
+	if err != nil {
+		return err
+	}
+	if !regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`).MatchString(class) || typescriptReserved[class] {
 		return fmt.Errorf("class must be a TypeScript class identifier")
 	}
 	if !regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(binary) {
@@ -151,7 +155,6 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string) error {
 	}
 	optionsName := class + "Options"
 	reserved[class], reserved[optionsName] = true, true
-	schema := r.Schema()
 	types := map[string]Type{}
 	var visit func(Type) error
 	visit = func(t Type) error {
@@ -173,7 +176,7 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string) error {
 		types[t.Name] = t
 		fields := map[string]string{}
 		for _, field := range t.Fields {
-			name := tsCamel(field.Name)
+			name := tsFieldName(field)
 			if !typescriptIdentifier.MatchString(name) || name == "constructor" || name == "prototype" || name == "__proto__" || name == "_runtime" {
 				return fmt.Errorf("field %s.%s maps to reserved TypeScript property %q", t.Name, field.Name, name)
 			}
@@ -194,7 +197,7 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string) error {
 	}
 	operations := map[string]string{}
 	for _, op := range schema.Operations {
-		name := tsCamel(op.Name)
+		name := tsOperationName(op)
 		if !typescriptIdentifier.MatchString(name) || typescriptReserved[name] || typescriptMethodReserved[name] || reserved[name] || strings.HasPrefix(name, "_bridge") {
 			return fmt.Errorf("operation %q maps to reserved TypeScript method %q", op.Name, name)
 		}
@@ -270,7 +273,7 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string) error {
 			params = "params: " + op.Input.Name + ", " + params
 			input = "params"
 		}
-		fmt.Fprintf(&b, "  async %s(%s): Promise<%s> {\n", tsCamel(op.Name), params, tsType(op.Output))
+		fmt.Fprintf(&b, "  async %s(%s): Promise<%s> {\n", tsOperationName(op), params, tsType(op.Output))
 		fmt.Fprintf(&b, "    const _bridgeResult = await super.call(%s, _bridgeInput%d.encode(%s), options);\n", tsQuote(op.Name), index, input)
 		fmt.Fprintf(&b, "    return _bridgeOutput%d.decode(_bridgeResult);\n  }\n\n", index)
 	}
@@ -287,7 +290,7 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string) error {
 			params = "params: " + op.Input.Name + ", " + params
 			args = "params, options"
 		}
-		fmt.Fprintf(&b, "export function %s(%s): Promise<%s> {\n  return _bridgeDefaults.client().%s(%s);\n}\n\n", tsCamel(op.Name), params, tsType(op.Output), tsCamel(op.Name), args)
+		fmt.Fprintf(&b, "export function %s(%s): Promise<%s> {\n  return _bridgeDefaults.client().%s(%s);\n}\n\n", tsOperationName(op), params, tsType(op.Output), tsOperationName(op), args)
 	}
 	_, err = io.WriteString(w, b.String())
 	return err

@@ -20,7 +20,7 @@ import (
 // Build tooling comes from the same Go module version as the registry. Copy it
 // into temporary staging so module caches stay read-only and outputs stay local.
 func runBuild(ctx context.Context, args []string, log io.Writer) error {
-	p, err := loadProject()
+	p, err := loadCommandProject(args)
 	if err != nil {
 		return err
 	}
@@ -30,13 +30,8 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 	typescript := flags.Bool("typescript", false, "build local npm tarballs with bundled binaries")
 	output := flags.String("output", "dist", "artifact output directory")
 	check := flags.Bool("check", false, "validate and print the build plan as JSON without writing files")
-	dryRun := flags.Bool("dry-run", false, "alias for --check")
 	replace := flags.Bool("replace", false, "replace existing artifacts with different contents")
 	targets := flags.String("targets", "all", "all or comma-separated OS-architecture targets")
-	flags.StringVar(&p.Source, "dir", p.Source, "annotated library directory; omit for manual registration")
-	flags.StringVar(&p.Command, "command", p.Command, "Go executable package")
-	flags.StringVar(&p.Name, "name", p.Name, "Python import path (dots allowed; binary uses underscores)")
-	flags.StringVar(&p.Class, "class", p.Class, "generated client class")
 	flags.StringVar(&p.Version, "version", p.Version, "application package version")
 	flags.StringVar(&p.PythonDistribution, "distribution", p.PythonDistribution, "Python distribution name")
 	flags.StringVar(&p.NPMPackage, "npm-package", p.NPMPackage, "npm package name")
@@ -65,12 +60,20 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if *check || *dryRun {
+	if *check {
 		return json.NewEncoder(os.Stdout).Encode(plan)
 	}
-	if p.Source != "" {
-		if err := sourcegen.Generate(p.Source, "zz_gobridge.gen.go"); err != nil {
-			return err
+	modules, err := p.resolveModules()
+	if err != nil {
+		return err
+	}
+	generated := map[string]bool{}
+	for _, module := range modules {
+		if module.Source != "" && !generated[absolute(module.Source)] {
+			if err := sourcegen.Generate(module.Source, "zz_gobridge.gen.go"); err != nil {
+				return err
+			}
+			generated[absolute(module.Source)] = true
 		}
 	}
 	root, err := os.Getwd()
@@ -112,8 +115,16 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		command.Stderr = log
 		return command.Run()
 	}
+	moduleData, err := json.Marshal(modules)
+	if err != nil {
+		return err
+	}
+	moduleFile := filepath.Join(stage, "modules.json")
+	if err := os.WriteFile(moduleFile, moduleData, 0644); err != nil {
+		return err
+	}
 	artifacts := filepath.Join(stage, "artifacts")
-	common := []string{"--project", root, "--go-package", p.Command, "--class", p.Class, "--binary", p.binaryName(), "--version", p.Version, "--repository", p.Repository, "--license", p.License, "--build-cache", filepath.Join(stage, "go-build")}
+	common := []string{"--modules", moduleFile, "--project", root, "--go-package", p.Command, "--class", p.Class, "--binary", p.binaryName(), "--version", p.Version, "--repository", p.Repository, "--license", p.License, "--build-cache", filepath.Join(stage, "go-build")}
 	targetArgs := []string{}
 	if *targets != "all" {
 		targetArgs = append(targetArgs, "--targets")

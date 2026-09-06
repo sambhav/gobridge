@@ -73,7 +73,6 @@ class Client:
         raise AssertionError(method)
     async def acall(self, method, params, **kwargs):
         return self.call(method, params, **kwargs)
-class AsyncClient(Client): pass
 class DefaultControl:
     def __init__(self, factory): self.factory, self.instance = factory, None
     def configure(self, **kwargs): self.config = kwargs
@@ -92,7 +91,7 @@ def decode(cls, value):
         assert type(value) is str
     return value
 def resolve_binary(path, stem): return ["bundled-" + stem]
-for name in ("RuntimeOptions", "Client", "AsyncClient", "DefaultControl", "decode", "resolve_binary"):
+for name in ("RuntimeOptions", "Client", "DefaultControl", "decode", "resolve_binary"):
     setattr(bridge, name, globals()[name])
 bridge.require_sync = lambda: None
 sys.modules["gobridge"] = bridge

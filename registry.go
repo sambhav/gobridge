@@ -53,14 +53,24 @@ func (op operation) inputSchema() Type {
 
 // Registry is immutable once serving starts. Registration is not concurrent.
 type Registry struct {
-	ops         map[string]operation
-	constructor *constructor
-	initMu      sync.Mutex
-	initAttempt bool
-	initialized bool
+	pythonNames     Names
+	typescriptNames Names
+	ops             map[string]operation
+	constructor     *constructor
+	initMu          sync.Mutex
+	initAttempt     bool
+	initialized     bool
 }
 
-func New() *Registry { return &Registry{ops: make(map[string]operation)} }
+func New(options ...Option) *Registry {
+	r := &Registry{ops: make(map[string]operation)}
+	for _, option := range options {
+		if option != nil {
+			option(r)
+		}
+	}
+	return r
+}
 
 var identifier = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 

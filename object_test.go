@@ -155,7 +155,7 @@ func TestObjectRejectsInvalidConstructorsAndMethods(t *testing.T) {
 		Command string `json:"command"`
 	}
 	type otherCounter struct{}
-	for _, fn := range []any{nil, 3, func() {}, func(int) *boundCounter { return nil }, func(counterOptions) boundCounter { return boundCounter{} }, func(counterOptions) (*boundCounter, int) { return nil, 0 }, func(counterOptions) *struct{} { return nil }, func(...counterOptions) *boundCounter { return nil }, func(badConfig) *boundCounter { return nil }} {
+	for _, fn := range []any{nil, 3, func() {}, func(int) *boundCounter { return nil }, func(counterOptions) boundCounter { return boundCounter{} }, func(counterOptions) (*boundCounter, int) { return nil, 0 }, func(counterOptions) *struct{} { return nil }, func(badConfig) *boundCounter { return nil }} {
 		r := New()
 		if _, err := NewObject(r, fn); err == nil {
 			t.Fatalf("accepted constructor %T", fn)

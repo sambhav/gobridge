@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -27,6 +28,7 @@ var embedPatternTokens = regexp.MustCompile("`[^`]*`|\"(?:[^\"\\\\]|\\\\.)*\"|[^
 const devMarker = "gobridge development package v1\n"
 
 type devOptions struct {
+	selectedModule *resolvedModule
 	project
 	output     string
 	app        []string
@@ -36,17 +38,14 @@ type devOptions struct {
 }
 
 func runDev(ctx context.Context, args []string, log io.Writer) error {
-	p, err := loadProject()
+	p, err := loadCommandProject(args)
 	if err != nil {
 		return err
 	}
 	options := devOptions{project: p}
 	flags := flag.NewFlagSet("dev", flag.ContinueOnError)
 	flags.SetOutput(log)
-	flags.StringVar(&options.Source, "dir", p.Source, "annotated library directory; omit for manual registration")
-	flags.StringVar(&options.Command, "command", p.Command, "Go executable package")
-	flags.StringVar(&options.Name, "name", p.Name, "Python import path (dots allowed; binary uses underscores)")
-	flags.StringVar(&options.Class, "class", p.Class, "generated client class")
+	moduleName := flags.String("module", "", "module name from gobridge.json")
 	flags.StringVar(&options.output, "python", "", "generated Python package directory (default build/<package/path>)")
 	flags.BoolVar(&options.typescript, "typescript", false, "generate a local npm package and restart a Node application")
 	flags.DurationVar(&options.interval, "interval", 500*time.Millisecond, "source polling interval")
@@ -56,6 +55,27 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 			return nil
 		}
 		return err
+	}
+	if len(p.Modules) > 0 || *moduleName != "" {
+		modules, err := p.resolveModules()
+		if err != nil {
+			return err
+		}
+		if *moduleName == "" && len(modules) == 1 {
+			*moduleName = modules[0].Name
+		}
+		for _, module := range modules {
+			if module.Name == *moduleName {
+				m := module
+				options.selectedModule = &m
+				options.project = m.project(p)
+				break
+			}
+		}
+		if options.selectedModule == nil {
+			return fmt.Errorf("select a configured module with --module NAME")
+		}
+
 	}
 	options.app = flags.Args()
 	if err := options.validate(); err != nil {
@@ -239,7 +259,12 @@ func buildDev(ctx context.Context, options devOptions, log io.Writer) error {
 		return buildDevTypeScript(ctx, options, binary, log)
 	}
 	stem := options.binaryName() + "-" + hex.EncodeToString(hash.Sum(nil))[:24]
-	generate := exec.CommandContext(ctx, binary, "generate-python", "--class", options.Class, "--binary", stem)
+	namesJSON := "{}"
+	if options.selectedModule != nil {
+		data, _ := json.Marshal(options.selectedModule.Python.Rename)
+		namesJSON = string(data)
+	}
+	generate := exec.CommandContext(ctx, binary, "generate-python", "--class", options.Class, "--binary", stem, "--names", namesJSON)
 	generate.Stderr = log
 	bindings, err := generate.Output()
 	if err != nil {

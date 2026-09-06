@@ -79,6 +79,10 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 	fset := token.NewFileSet()
 	var packageName string
 	var declarations []declaration
+	languageNames := map[string]map[string]map[string]string{}
+	for _, lang := range []string{"python", "ts"} {
+		languageNames[lang] = map[string]map[string]string{"types": {}, "operations": {}, "class": {}, "fields": {}}
+	}
 	names := make(map[string]bool)
 	for _, entry := range entries {
 		name := entry.Name()
@@ -123,6 +127,17 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 					switch s := spec.(type) {
 					case *ast.TypeSpec:
 						names[s.Name.Name] = true
+						doc := s.Doc
+						if doc == nil {
+							doc = d.Doc
+						}
+						renames, err := languageAnnotations(doc)
+						if err != nil {
+							return nil, fmt.Errorf("%s: %w", fset.Position(s.Pos()), err)
+						}
+						for lang, name := range renames {
+							languageNames[lang]["types"][s.Name.Name] = name
+						}
 					case *ast.ValueSpec:
 						for _, n := range s.Names {
 							names[n.Name] = true
@@ -140,6 +155,8 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 	}
 	var operations []operation
 	var constructor, receiver string
+	var functional bool
+	var optionFactories []operation
 	seen := make(map[string]token.Position)
 	for _, decl := range declarations {
 		fn := decl.fn
@@ -155,7 +172,41 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 		if fn.Type.TypeParams != nil && len(fn.Type.TypeParams.List) != 0 {
 			return fail(fmt.Errorf("generic declarations need a concrete wrapper"))
 		}
-		params, err := parameters(fn.Type.Params, decl.context)
+		renames, renameErr := languageAnnotations(fn.Doc)
+		if renameErr != nil {
+			return fail(renameErr)
+		}
+		if annotation == "option" {
+			if fn.Recv != nil {
+				return fail(fmt.Errorf("option factory must be a function"))
+			}
+			if exposed == "" {
+				exposed = snakeCase(strings.TrimPrefix(fn.Name.Name, "With"))
+			}
+			if !wireName.MatchString(exposed) {
+				return fail(fmt.Errorf("invalid option name %q", exposed))
+			}
+			var params []string
+			if len(resultTypes(fn.Type.Params)) > 1 {
+				params, err = parameters(fn.Type.Params, "")
+				if err != nil {
+					return fail(err)
+				}
+			}
+			optionFactories = append(optionFactories, operation{name: exposed, function: fn.Name.Name, position: position, params: params})
+			for lang, name := range renames {
+				languageNames[lang]["fields"][exposed] = name
+			}
+			continue
+		}
+		isFunctional := false
+		if annotation == "constructor" && fn.Type.Params != nil && len(fn.Type.Params.List) > 0 {
+			_, isFunctional = fn.Type.Params.List[len(fn.Type.Params.List)-1].Type.(*ast.Ellipsis)
+		}
+		var params []string
+		if !isFunctional {
+			params, err = parameters(fn.Type.Params, decl.context)
+		}
 		if err != nil {
 			return fail(err)
 		}
@@ -166,7 +217,7 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 			if constructor != "" {
 				return fail(fmt.Errorf("multiple constructors: %s and %s; one object per registry is supported", constructor, fn.Name.Name))
 			}
-			if len(params) != 1 {
+			if !isFunctional && len(params) != 1 {
 				return fail(fmt.Errorf("constructor needs one named options parameter and optional leading context.Context"))
 			}
 			results := resultTypes(fn.Type.Results)
@@ -182,6 +233,10 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 				return fail(fmt.Errorf("constructor must return a pointer to a named local type; generic receivers need a concrete wrapper"))
 			}
 			constructor, receiver = fn.Name.Name, name.Name
+			functional = isFunctional
+			for lang, public := range renames {
+				languageNames[lang]["class"]["class"] = public
+			}
 			continue
 		}
 		if exposed == "" {
@@ -194,6 +249,9 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 			return fail(fmt.Errorf("operation name %q collides with declaration at %s", exposed, prior))
 		}
 		seen[exposed] = position
+		for lang, name := range renames {
+			languageNames[lang]["operations"][exposed] = name
+		}
 		op := operation{name: exposed, function: fn.Name.Name, params: params, description: description, position: position}
 		if fn.Recv != nil {
 			expr := fn.Recv.List[0].Type
@@ -207,6 +265,23 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 			op.receiver = recv.Name
 		}
 		operations = append(operations, op)
+	}
+	if len(optionFactories) > 0 && !functional {
+		return nil, fmt.Errorf("//gobridge:option requires a variadic //gobridge:constructor")
+	}
+	for _, lang := range []string{"python", "ts"} {
+		if public, ok := languageNames[lang]["types"][receiver]; ok {
+			if languageNames[lang]["class"]["class"] == "" {
+				languageNames[lang]["class"]["class"] = public
+			}
+			delete(languageNames[lang]["types"], receiver)
+		}
+		fields := languageNames[lang]["fields"]
+		qualified := map[string]string{}
+		for name, value := range fields {
+			qualified[receiver+"Config."+name] = value
+		}
+		languageNames[lang]["fields"] = qualified
 	}
 	if len(operations) == 0 {
 		return nil, fmt.Errorf("no //gobridge:export declarations found in %s", dir)
@@ -225,6 +300,7 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 		return name
 	}
 	bridge, registry, object, errName := unique("_gobridge"), unique("_registry"), unique("_object"), unique("_err")
+	optionsName := unique("_options")
 	usesObject := false
 	for _, op := range operations {
 		usesObject = usesObject || op.receiver != ""
@@ -234,9 +310,61 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 	}
 	var out bytes.Buffer
 	fmt.Fprintf(&out, "%s\n\npackage %s\n\nimport %s %q\n\n", marker, packageName, bridge, "github.com/sambhav/gobridge")
-	fmt.Fprintf(&out, "// NewGobridge registers annotated operations without running their constructors.\nfunc NewGobridge() (*%s.Registry, error) {\n%s := %s.New()\n", bridge, registry, bridge)
+	fmt.Fprintf(&out, "// NewGobridge registers annotated operations without running their constructors.\nfunc NewGobridge(%s ...%s.Option) (*%s.Registry, error) {\n", optionsName, bridge, bridge)
+	hasNames := false
+	for _, language := range languageNames {
+		for _, values := range language {
+			hasNames = hasNames || len(values) > 0
+		}
+	}
+	if !hasNames {
+		fmt.Fprintf(&out, "%s := %s.New(%s...)\n", registry, bridge, optionsName)
+	} else {
+		fmt.Fprintf(&out, "%s := %s.New(append([]%s.Option{", registry, bridge, bridge)
+		for _, lang := range []string{"python", "ts"} {
+			method := "WithPython"
+			if lang == "ts" {
+				method = "WithTypeScript"
+			}
+			fmt.Fprintf(&out, "%s.%s(%s.Names{", bridge, method, bridge)
+			if class := languageNames[lang]["class"]["class"]; class != "" {
+				fmt.Fprintf(&out, "Class:%q,", class)
+			}
+			for _, kind := range []string{"types", "operations", "fields"} {
+				values := languageNames[lang][kind]
+				if len(values) == 0 {
+					continue
+				}
+				field := strings.ToUpper(kind[:1]) + kind[1:]
+				fmt.Fprintf(&out, "%s:map[string]string{", field)
+				keys := make([]string, 0, len(values))
+				for key := range values {
+					keys = append(keys, key)
+				}
+				sort.Strings(keys)
+				for _, key := range keys {
+					fmt.Fprintf(&out, "%q:%q,", key, values[key])
+				}
+				fmt.Fprint(&out, "},")
+			}
+			fmt.Fprint(&out, "}),")
+		}
+		fmt.Fprintf(&out, "},%s...)...)\n", optionsName)
+	}
 	if constructor != "" {
-		fmt.Fprintf(&out, "%s, %s := %s.NewObject(%s, %s)\nif %s != nil { return nil, %s }\n", object, errName, bridge, registry, constructor, errName, errName)
+		fmt.Fprintf(&out, "%s, %s := %s.NewObject(%s, %s", object, errName, bridge, registry, constructor)
+		// Source order is stable: sorted files, then declaration order.
+		for _, option := range optionFactories {
+			fmt.Fprintf(&out, ", %s.ConstructorOption(%q, %s", bridge, option.name, option.function)
+			if len(option.params) > 1 {
+				for _, param := range option.params {
+					fmt.Fprintf(&out, ", %q", param)
+				}
+			}
+			fmt.Fprint(&out, ")")
+		}
+		fmt.Fprintf(&out, ")\nif %s != nil {return nil,%s}\n", errName, errName)
+
 	}
 	for _, op := range operations {
 		call := fmt.Sprintf("%s.Bind(%s, %q, %s", bridge, registry, op.name, op.function)
@@ -274,18 +402,21 @@ func annotations(group *ast.CommentGroup) (kind, name, description string, err e
 			}
 			continue
 		}
+		if directive := strings.Fields(text)[0]; directive == "gobridge:python" || directive == "gobridge:ts" {
+			continue
+		}
 		if kind != "" {
 			err = fmt.Errorf("only one gobridge annotation is allowed per declaration")
 			return
 		}
 		parts := strings.Fields(text)
 		switch parts[0] {
-		case "gobridge:export":
+		case "gobridge:option", "gobridge:export":
 			if len(parts) > 2 {
 				err = fmt.Errorf("use //gobridge:export [operation_name]")
 				return
 			}
-			kind = "export"
+			kind = strings.TrimPrefix(parts[0], "gobridge:")
 			if len(parts) == 2 {
 				name = parts[1]
 			}
@@ -382,4 +513,25 @@ func snakeCase(name string) string {
 		out.WriteRune(unicode.ToLower(r))
 	}
 	return out.String()
+}
+
+// Language names are additional metadata, not export declarations.
+func languageAnnotations(group *ast.CommentGroup) (map[string]string, error) {
+	result := map[string]string{}
+	if group == nil {
+		return result, nil
+	}
+	for _, comment := range group.List {
+		text := strings.TrimSpace(strings.TrimPrefix(comment.Text, "//"))
+		parts := strings.Fields(text)
+		if len(parts) == 0 || (parts[0] != "gobridge:python" && parts[0] != "gobridge:ts") {
+			continue
+		}
+		lang := strings.TrimPrefix(parts[0], "gobridge:")
+		if len(parts) != 2 || result[lang] != "" {
+			return nil, fmt.Errorf("use one //gobridge:%s name per declaration", lang)
+		}
+		result[lang] = parts[1]
+	}
+	return result, nil
 }

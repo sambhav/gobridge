@@ -35,7 +35,7 @@ def project(tmp_path):
         'package main\nimport greeter "example.test/project"\n'
         'func main() { r,err := greeter.NewGobridge(); if err!=nil { panic(err) }; r.Main() }\n'
     )
-    (tmp_path / "gobridge.json").write_text(json.dumps({"name": "greeter", "source": ".", "command": "./cmd/service"}))
+    (tmp_path / "gobridge.json").write_text(json.dumps({"modules": [{"name": "greeter", "source": ".", "command": "./cmd/service"}]}))
     return tmp_path
 
 
@@ -102,7 +102,7 @@ def test_dev_refuses_handwritten_packages_and_unknown_configuration(author_cli, 
     result = dev(author_cli, project, "--once", success=False)
     assert "refusing to overwrite" in result.stderr
     assert entry.read_text() == "handwritten = True\n"
-    (project / "gobridge.json").write_text('{"name":"greeter","typo":true}')
+    (project / "gobridge.json").write_text('{"modules":[{"name":"greeter"}],"typo":true}')
     assert "unknown field" in dev(author_cli, project, "--once", success=False).stderr
 
 
@@ -118,7 +118,7 @@ def wait_for(predicate, message, timeout=40):
 @pytest.mark.parametrize("package_name", ["greeter", "acme.tools.greeter"])
 def test_dev_watch_reloads_python_and_go_and_keeps_app_on_build_failure(author_cli, project, package_name):
     manifest = json.loads((project / "gobridge.json").read_text())
-    manifest["name"] = package_name
+    manifest["modules"][0]["python"] = {"module": package_name}
     (project / "gobridge.json").write_text(json.dumps(manifest))
     package_dir = project / "build" / Path(*package_name.split("."))
     app = project / "app.py"
@@ -167,7 +167,7 @@ while True:
 
 def test_dotted_dev_custom_output_and_namespace_ownership(author_cli, project):
     manifest = json.loads((project / "gobridge.json").read_text())
-    manifest["name"] = "acme.tools.greeter"
+    manifest["modules"][0]["python"] = {"module": "acme.tools.greeter"}
     (project / "gobridge.json").write_text(json.dumps(manifest))
     output = project / "custom" / "acme" / "tools" / "greeter"
     dev(author_cli, project, "--once", "--python", str(output))

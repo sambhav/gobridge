@@ -29,7 +29,7 @@ def main():
         target = subprocess.check_output(["go", "env", "GOOS"], text=True).strip() + "-" + subprocess.check_output(["go", "env", "GOARCH"], text=True).strip()
         # Inspection does not generate adapters or dist even in a fresh scaffold.
         plan = json.loads(run(cli, "build", "--check", "--targets", target).stdout)
-        assert plan["project"]["name"] == "acme.tools.greeter"
+        assert plan["modules"][0]["python"]["module"] == "acme.tools.greeter"
         assert not (project / "bridge/zz_gobridge.gen.go").exists()
         assert not (project / "dist").exists()
         run(cli, "generate", "--dir", "bridge")
@@ -48,7 +48,10 @@ def main():
         assert "Hello, World!" in run("node", "app.mts").stdout
         source.write_text(original)
         config = json.loads((project / "gobridge.json").read_text())
-        config.update(python_package="python-package", typescript_package="typescript-package", python_requires=["typing-extensions>=4"], npm_dependencies={"escape-string-regexp": "5.0.0"})
+        config["modules"][0]["python"]["package"] = "python-package"
+        config["modules"][0]["typescript"]["package"] = "typescript-package"
+        config["python"]["requires"] = ["typing-extensions>=4"]
+        config["typescript"]["dependencies"] = {"escape-string-regexp": "5.0.0"}
         (project / "gobridge.json").write_text(json.dumps(config))
         py = project / "python-package"
         ts = project / "typescript-package"

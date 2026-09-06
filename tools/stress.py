@@ -10,13 +10,13 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'python/src'))
-from gobridge import AsyncClient, BusyError, ClosedError, DaemonError
+from gobridge import Client, BusyError, ClosedError, DaemonError
 
 
 async def exercise(binary, rounds):
     started = time.monotonic()
     for iteration in range(rounds):
-        client = AsyncClient(binary, max_pending=8, timeout=10)
+        client = Client(binary, max_pending=8, timeout=10)
         await client.acall('work',dict(data='',rounds=0,nodes=[]))
         transport = client._transport  # Test-only inspection of resource ownership.
         process = transport.proc

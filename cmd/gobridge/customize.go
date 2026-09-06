@@ -18,14 +18,14 @@ func validateCustomization(p project, python, typescript bool) error {
 	if python {
 		for _, requirement := range p.PythonRequires {
 			if !requirements.MatchString(requirement) {
-				return fmt.Errorf("invalid python_requires entry %q; use names, extras, and version comparisons", requirement)
+				return fmt.Errorf("invalid python.requires entry %q; use names, extras, and version comparisons", requirement)
 			}
 		}
 	}
 	if typescript {
 		for name, value := range p.NPMDependencies {
 			if !validNPMName(name) || strings.TrimSpace(value) == "" || strings.ContainsAny(value, "\r\n\x00") {
-				return fmt.Errorf("invalid npm_dependencies entry %q", name)
+				return fmt.Errorf("invalid typescript.dependencies entry %q", name)
 			}
 		}
 	}
