@@ -24,6 +24,8 @@ func cliType(t Type) string {
 			return elem
 		}
 		return elem + " or null"
+	case "array":
+		return fmt.Sprintf("array[%s; %d]", cliType(*t.Elem), t.Length)
 	case "slice":
 		return "array[" + cliType(*t.Elem) + "] or null"
 	case "map":
@@ -69,7 +71,7 @@ func cliFieldNotes(field Field) string {
 
 func cliField(out io.Writer, name string, field Field) {
 	required := "required"
-	if field.Type.Kind == "ptr" {
+	if field.optional() {
 		required = "optional"
 	}
 	fmt.Fprintf(out, "  %s\t%s\t%s", name, cliType(field.Type), required)
@@ -143,6 +145,7 @@ func (r *Registry) cliHelp(out io.Writer) {
 	}
 	_ = w.Flush()
 	fmt.Fprintln(out, "\nCommands:")
+	fmt.Fprintln(w, "  api\tSnapshot public Python/TypeScript APIs.")
 	fmt.Fprintln(w, "  serve\tRun the private stdio daemon.")
 	fmt.Fprintln(w, "  schema\tPrint the complete JSON schema.")
 	fmt.Fprintln(w, "  generate-python\tGenerate typed Python functions and clients.")
@@ -187,7 +190,7 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 		}
 		config = json.RawMessage(args[1])
 		args = args[2:]
-		if args[0] == "serve" || args[0] == "schema" || args[0] == "generate-python" || args[0] == "generate-typescript" || args[0] == "help" || cliHelpFlag(args[0]) {
+		if args[0] == "api" || args[0] == "serve" || args[0] == "schema" || args[0] == "generate-python" || args[0] == "generate-typescript" || args[0] == "help" || cliHelpFlag(args[0]) {
 			return fmt.Errorf("--config is supported for direct operation commands only")
 		}
 	}
@@ -222,6 +225,30 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 			return fmt.Errorf("schema does not accept arguments")
 		}
 		return json.NewEncoder(out).Encode(r.Schema())
+	case "api":
+		flags := flag.NewFlagSet("api", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		class := flags.String("class", "Service", "fallback public class name")
+		pyNames := flags.String("python-names", "{}", "Python naming overrides JSON")
+		tsNames := flags.String("typescript-names", "{}", "TypeScript naming overrides JSON")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 {
+			return fmt.Errorf("unexpected API arguments")
+		}
+		var py, ts Names
+		if err := json.Unmarshal([]byte(*pyNames), &py); err != nil {
+			return err
+		}
+		if err := json.Unmarshal([]byte(*tsNames), &ts); err != nil {
+			return err
+		}
+		snapshot, err := r.API(*class, WithPython(py), WithTypeScript(ts))
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(out).Encode(snapshot)
 	case "generate-python":
 		flags := flag.NewFlagSet("generate-python", flag.ContinueOnError)
 		flags.SetOutput(stderr)

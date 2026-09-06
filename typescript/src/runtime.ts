@@ -11,6 +11,17 @@ import {
 const MAX_FRAME = 1024 * 1024;
 const MAX_TIMEOUT = 86_400_000;
 
+/** Generated, snapshotted call descriptor. Construction does not start a daemon. */
+export class Call<T> {
+  readonly #params: string;
+  constructor(readonly method: string, params: unknown, readonly decode: (value: unknown) => T) {
+    this.#params = stringifyWire(params);
+  }
+  wire(): {method:string; params:unknown} { return {method:this.method,params:parseWire(this.#params)}; }
+}
+export type BatchResult<T> = {result:T; error?:never} | {result:null; error:BridgeError};
+type CallValue<C> = C extends Call<infer T> ? T : unknown;
+
 export interface RuntimeOptions {
   readonly command?: string | readonly string[];
   readonly timeoutMs?: number;
@@ -409,9 +420,15 @@ export class Client implements AsyncDisposable {
     return transport.submit(method, params, timeoutMs, options.signal);
   }
 
-  async batch(calls: readonly {method: string; params?: unknown}[], options: CallOptions = {}): Promise<readonly {result: unknown; error?: BridgeError}[]> {
-    const results = await this.call("$batch", {calls}, options) as {result: unknown; error?: unknown}[];
-    return results.map(result => result.error === undefined ? {result: result.result} : {result: null, error: errorFromWire(result.error)});
+  async batch<const C extends readonly (Call<unknown> | {method:string; params?:unknown})[]>(calls: C, options: CallOptions = {}): Promise<{readonly [K in keyof C]: BatchResult<CallValue<C[K]>>}> {
+    if(calls.length>128) throw new RangeError("batch limit is 128 calls");
+    const descriptors=[...calls];
+    const results = await this.call("$batch", {calls:descriptors.map(call=>call instanceof Call?call.wire():call)}, options) as {result: unknown; error?: unknown}[];
+    if(!Array.isArray(results)||results.length!==descriptors.length)throw new DaemonError("protocol","batch result count mismatch");
+    return results.map((result,index) => {
+      if(result.error!==undefined)return {result:null,error:errorFromWire(result.error)};
+      const call=descriptors[index];return {result:call instanceof Call?call.decode(result.result):result.result};
+    }) as {readonly [K in keyof C]: BatchResult<CallValue<C[K]>>};
   }
 
   async *stream(method: string, params: unknown = {}, options: CallOptions = {}): AsyncGenerator<unknown> {

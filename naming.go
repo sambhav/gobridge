@@ -108,7 +108,7 @@ func (r *Registry) bindingSchema(language, class string, options []Option) (Sche
 		if t.Elem != nil {
 			return visit(t.Elem)
 		}
-		if t.Kind != "struct" {
+		if t.Kind != "struct" && len(t.Enum) == 0 {
 			return nil
 		}
 		original := t.Name

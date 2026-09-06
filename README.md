@@ -138,6 +138,7 @@ can be built from its directory with `go run ../../cmd/gobridge build --python -
 | `modules[].name` | Required unique identifier used by `dev --module`. |
 | `modules[].source` | Directory scanned for annotations; omit for manual registration. |
 | `modules[].command` | Required Go main package. |
+| `modules[].command_prefix` | Argument array locating bridge commands inside an existing binary, e.g. `["bridge"]`. |
 | `modules[].python.module` | Python import path; defaults to module name. |
 | `modules[].typescript.export` | npm export path, `.` or `./subpath`; defaults to module name with dots changed to slashes and prefixed by `./`. |
 | `modules[].python.class`, `modules[].typescript.class` | Explicit generated class names; otherwise source annotations or a name derived from the Python import path. |
@@ -675,29 +676,36 @@ its stream. Each item retains the 1 MiB frame limit. This first implementation i
 server-to-client streaming; it does not expose arbitrary channels, client streams,
 or bidirectional streams. Errors can arrive after earlier items were delivered.
 
-For a batch, use `client.batch(calls)` in synchronous Python/TypeScript, or
-`await client.abatch(calls)` in async Python. TypeScript `batch` returns a Promise.
-The Go equivalent is `registry.Batch(ctx, calls)`.
+For a typed batch, construct descriptors through `client.calls` (also exported as
+module-level `calls`). This uses the generated public names and model types:
 
 ```python
-results = await client.abatch([
-    {"method": "lookup", "params": {"id": "first"}},
-    {"method": "lookup", "params": {"id": "second"}},
-])
-for result in results:
-    if "error" in result:
-        print(result["error"].code)
-    else:
-        print(result["result"])
+first = client.calls.lookup(id="first")
+second = client.calls.lookup(id="second")
+results = await client.abatch([first, second])
+first_model = results.get(first)  # typed return value; raises this call's error
 ```
 
-Batches use stable **wire names** and wire-shaped parameters; results remain wire
-values rather than generated dataclasses. Errors are `BridgeError` instances with
-code/message/details in both languages. At most 128 unary calls execute in input
-order, in one round trip. Individual failures allow subsequent calls to run.
-Cancellation prevents remaining handlers from starting; a response-budget overflow
-marks remaining calls as unexecuted. Batches are not atomic and never roll back
-or replay effects. Streaming operations cannot be nested in a batch.
+```typescript
+const [first, second] = await client.batch([
+  client.calls.lookup({id: "first"}),
+  client.calls.lookup({id: "second"}),
+]);
+if (!first.error) console.log(first.result); // inferred generated model type
+```
+
+Descriptors snapshot their arguments immediately and do not start a subprocess.
+Python's `BatchResults.get(descriptor)` preserves its result type; indexed entries
+also expose `result` or a `BridgeError`. Create a separate descriptor for each
+entry in a Python batch. Use `client.batch` in synchronous Python and `abatch` in
+async Python; TypeScript `batch` returns a Promise. Streams have no batch descriptor.
+
+Raw `{method, params}` dictionaries/objects remain available for dynamic callers;
+these use stable wire names and return wire values. The Go equivalent is
+`registry.Batch(ctx, calls)`. At most 128 unary calls execute in input order, in one
+round trip. Individual errors allow subsequent calls to run. Cancellation prevents
+remaining handlers from starting; response-budget overflow marks remaining calls
+as unexecuted. Batches are not atomic and never roll back or replay effects.
 
 ## Errors and observability
 
@@ -737,23 +745,28 @@ inherit stderr, so logs reach the parent application's normal logging destinatio
 
 ## Types, validation, and runtime settings
 
-Supported values are strings, booleans, signed integers, finite floats, named
-structs, slices, string-keyed maps and pointers. Struct fields need explicit
+Supported values are strings, booleans, signed/unsigned integers, finite floats,
+named structs, fixed arrays, slices, string-keyed maps and pointers. Struct fields need explicit
 `json` names. Pointer inputs are optional/nullable; slices/maps are required but
 can be null. Bytes, timestamps, and durations have the explicit codecs described
-below. TypeScript omits absent `omitempty` pointer properties. Other custom
-marshalers, recursive types, interfaces, variadic functions and multiple non-error
-results need adapters.
+below. TypeScript omits absent optional properties. Recursive types, embedded
+struct fields, arbitrary interfaces, variadic functions and multiple non-error
+results still need explicit wrappers. Custom marshalers can opt in using
+`GobridgeWireType`, described below.
 
 | Go type | Python | TypeScript |
 | --- | --- | --- |
 | `int8` / `int16` / `int32` | `int` within Go range | `number` within Go range |
 | `int` | `int` within target Go range | Safe integer `number` |
-| `int64` | Exact `int` | Exact `bigint`, even for small values |
+| `int64` / `uint64` | Exact `int` | Exact `bigint`, even for small values |
+| `uint8` / `uint16` / `uint32` | Nonnegative `int` within Go range | Nonnegative `number` within Go range |
+| `uint` | Nonnegative `int` within target Go range | Nonnegative safe-integer `number` |
+| `[N]T` | Non-null `list[T]`, exactly N items | Non-null `ReadonlyArray<T>`, runtime length checked |
 | `float32` / `float64` | Finite `float` | Finite `number` |
 | Named struct | Frozen dataclass | Readonly interface |
 
-Use Go `int64` when Node needs the full range. Unsafe Numbers fail explicitly.
+Use Go `int64` or `uint64` when Node needs the full range. `uintptr` remains
+unsupported. Fixed byte arrays are numeric arrays; `[]byte` keeps its base64 codec. Unsafe Numbers fail explicitly.
 Bigints cross the existing JSON protocol as exact numeric literals; application
 `JSON.stringify` still needs its own bigint-aware serializer.
 
@@ -797,6 +810,97 @@ For test commands, protocol details, measurements and release work, see
 [Contributing](CONTRIBUTING.md).
 
 
+### Enums and custom wire types
+
+Annotate a defined string or integer type with `//gobridge:enum`. Export explicitly
+typed constants; omitted declarations in a typed `const` block inherit its type
+and support `iota`. Arbitrary inferred constant expressions are not discovered.
+
+```go
+//gobridge:enum
+type Mode string
+const (
+    Fast Mode = "fast"
+    Careful Mode = "careful"
+)
+```
+
+Generation adds `GobridgeEnum() map[string]Mode`. Python receives a `str, Enum`
+subclass (or `IntEnum` for integer types); TypeScript receives an `as const` object
+and a value-union type. Unknown values fail validation. Type-name overrides apply
+to enums too. For manual registration, implement that method yourself; do not
+combine a manual method with the annotation. Enum methods must be deterministic
+and work on a zero value. Only enum constants are exported by this feature;
+arbitrary package constants are not automatically exposed.
+
+An existing type with JSON/text marshalers can explicitly declare its wire type:
+
+```go
+type Identifier string
+func (Identifier) GobridgeWireType() reflect.Type { return reflect.TypeOf("") }
+func (v Identifier) MarshalText() ([]byte, error) { return []byte(v), nil }
+func (v *Identifier) UnmarshalText(data []byte) error {
+    // Validate the representation here before assigning it.
+    *v = Identifier(data)
+    return nil
+}
+```
+
+The wire type can be any supported type, including a struct. Go's JSON/text methods
+perform conversion; generated clients expose the declared wire representation.
+This works for wrappers around UUIDs, decimal strings, or custom JSON values,
+without adding dependencies to GoBridge. Implement both encoding and decoding for
+bidirectional types. `GobridgeWireType` must be deterministic, side-effect-free,
+and safe on a zero value; nil/self-referential mappings are rejected. It does not
+create a native Python UUID/Decimal class automatically.
+
+### Required, nullable, and omitted fields
+
+`required` and `nullable` tags control presence independently of pointer shape:
+
+```go
+type Patch struct {
+    Region *string `json:"region" required:"true"` // must be present; null allowed
+    Label *string `json:"label,omitempty" required:"false" nullable:"false"`
+}
+```
+
+A required field cannot also use `omitempty`. `required:"false"` permits omission;
+`nullable:"false"` rejects explicit null. Existing untagged pointers keep their
+optional/nullable behavior. In Python, explicitly optional fields and optional
+non-null fields default to `UNSET`; generated serializers omit that sentinel.
+`None` still means explicit JSON null. Import `UNSET` directly from your generated module, or use the generated field
+defaults.
+TypeScript uses `undefined`/absent properties for omission and `null` for null.
+
+This makes wire presence explicit; it does not give a Go pointer an additional
+presence bit. Use a purpose-built request type if a Go handler must distinguish
+omitted from explicitly null for the same optional, nullable field. A zero Go
+pointer can represent either after ordinary JSON decoding.
+
+### API snapshots for CI
+
+Snapshot the registry through its binary (including its embedded prefix):
+
+```sh
+./host bridge api --class Greeter > api-after.json
+gobridge api-diff --check api-before.json api-after.json
+```
+
+The snapshot contains both public language schemas and class names. Pass
+`--python-names` and `--typescript-names` JSON when reproducing per-module naming
+maps, including their `class` override; use the same configuration for both
+snapshots. Direct Go callers can use `registry.API(class, options...)` and
+`gobridge.DiffAPI(before, after)`.
+
+Diff output is deterministic JSON with paths, old/new values and a `breaking`
+flag. New operations and documentation-only edits are safe. Removals, renames,
+type/nullability/enum/constraint changes are conservatively flagged for review,
+even where a particular change may be compatible. `--check` fails if any such
+changes exist. Wire hashes are ignored for this comparison; exact runtime
+handshake checks remain unchanged. This is a schema-based compatibility check,
+not a behavioral or whole-package source-code compatibility proof.
+
 ### Bytes and time values
 
 | Go | Python | TypeScript | JSON wire value |
@@ -812,7 +916,8 @@ Go validates timestamp values. Monotonic clock readings and timezone location
 names are not carried over JSON. Durations use nanoseconds, never floating-point
 seconds. These codec kinds participate in the schema fingerprint.
 
-Other types with custom JSON or text marshalers still require explicit adapters.
+Other types with custom JSON or text marshalers must declare `GobridgeWireType`
+or use an explicit wrapper.
 
 ## Breaking API changes
 

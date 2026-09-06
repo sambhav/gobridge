@@ -9,6 +9,7 @@ import atexit
 import base64
 import asyncio
 import concurrent.futures as futures
+import enum
 import dataclasses
 from functools import lru_cache
 import json
@@ -72,6 +73,14 @@ def resolve_binary(module_file: str, name: str) -> str:
     raise FileNotFoundError(f"{filename} is not bundled or on PATH; pass command='/path/to/{filename}'")
 
 
+class UnsetType:
+    __slots__ = ()
+    def __repr__(self): return "UNSET"
+    def __reduce__(self): return (_unset, ())
+def _unset(): return UNSET
+UNSET = UnsetType()
+
+
 class BridgeError(Exception):
     def __init__(self, code: str, message: str, details=None):
         self.details = {} if details is None else dict(details)
@@ -123,11 +132,54 @@ def _json_default(value):
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         # JSON visits nested values itself. asdict would recursively copy the
         # entire graph before the encoder traverses that same graph again.
-        return {field.metadata.get("wire_name", field.name): getattr(value, field.name) for field in dataclasses.fields(value)}
+        return {field.metadata.get("wire_name", field.name): getattr(value, field.name) for field in dataclasses.fields(value) if getattr(value, field.name) is not UNSET}
     raise TypeError(f"Cannot encode {type(value).__name__}")
 
 
 T = typing.TypeVar("T")
+
+
+class Call(typing.Generic[T]):
+    """A snapshotted generated call; constructing it never starts a process."""
+    def __init__(self, method: str, params, convert: typing.Callable[[typing.Any], T]):
+        self.method = method
+        self._params = json.dumps(params, default=_json_default, allow_nan=False)
+        self.convert = convert
+
+    def wire(self):
+        return {"method": self.method, "params": json.loads(self._params)}
+
+
+class BatchResults(list):
+    def __init__(self, calls, values):
+        super().__init__()
+        self._calls = calls
+        if not isinstance(values, list) or len(values) != len(calls):
+            raise DaemonError("protocol", "batch result count mismatch")
+        for call, item in zip(calls, values):
+            if "error" in item:
+                self.append({"result": None, "error": _error(item["error"])})
+            else:
+                self.append({"result": call.convert(item["result"]) if isinstance(call, Call) else item["result"]})
+
+    def get(self, call: Call[T]) -> T:
+        """Return this descriptor's typed value, raising its individual error."""
+        for candidate, result in zip(self._calls, self):
+            if candidate is call:
+                if "error" in result:
+                    raise result["error"]
+                return result["result"]
+        raise KeyError("call was not part of this batch")
+
+
+def _batch_request(calls):
+    calls = list(calls)
+    if len(calls) > 128:
+        raise ValueError("batch limit is 128 calls")
+    descriptors = [id(call) for call in calls if isinstance(call, Call)]
+    if len(set(descriptors)) != len(descriptors):
+        raise ValueError("create a separate descriptor for each batch entry")
+    return calls, {"calls": [call.wire() if isinstance(call, Call) else call for call in calls]}
 
 
 @lru_cache(maxsize=512)
@@ -145,6 +197,8 @@ def _decoder(cls):
     memo = {}
 
     def compile_type(cls):
+        if isinstance(cls, type) and issubclass(cls, enum.Enum):
+            return cls
         if cls in (str, int, float, bool, typing.Any):
             return identity
         if cls in memo:
@@ -514,14 +568,14 @@ class Client:
             t.cancel(request_id)
             raise
 
-    def batch(self, calls, *, timeout=None):
+    def batch(self, calls, *, timeout=None) -> BatchResults:
         """Run up to 128 {method, params} calls in order; errors are per entry."""
-        results = self.call("$batch", {"calls": calls}, timeout=timeout)
-        return [{**item, "error": _error(item["error"])} if "error" in item else item for item in results]
+        calls, request = _batch_request(calls)
+        return BatchResults(calls, self.call("$batch", request, timeout=timeout))
 
-    async def abatch(self, calls, *, timeout=None):
-        results = await self.acall("$batch", {"calls": calls}, timeout=timeout)
-        return [{**item, "error": _error(item["error"])} if "error" in item else item for item in results]
+    async def abatch(self, calls, *, timeout=None) -> BatchResults:
+        calls, request = _batch_request(calls)
+        return BatchResults(calls, await self.acall("$batch", request, timeout=timeout))
 
     def stream(self, method, params=None, *, timeout=None):
         """Pull items lazily. Close the iterator when abandoning it early."""

@@ -79,6 +79,8 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 	fset := token.NewFileSet()
 	var packageName string
 	var declarations []declaration
+	enumTypes := map[string]bool{}
+	enumConstants := map[string][]string{}
 	languageNames := map[string]map[string]map[string]string{}
 	for _, lang := range []string{"python", "ts"} {
 		languageNames[lang] = map[string]map[string]string{"types": {}, "operations": {}, "class": {}, "fields": {}}
@@ -123,6 +125,7 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 				}
 				declarations = append(declarations, declaration{d, contextAlias})
 			case *ast.GenDecl:
+				lastConstType := ""
 				for _, spec := range d.Specs {
 					switch s := spec.(type) {
 					case *ast.TypeSpec:
@@ -130,6 +133,19 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 						doc := s.Doc
 						if doc == nil {
 							doc = d.Doc
+						}
+						if doc != nil {
+							for _, comment := range doc.List {
+								if strings.TrimSpace(comment.Text) == "//gobridge:enum" {
+									if s.TypeParams != nil {
+										return nil, fmt.Errorf("enum %s requires a concrete type", s.Name.Name)
+									}
+									if s.Assign.IsValid() {
+										return nil, fmt.Errorf("enum %s must be a defined type", s.Name.Name)
+									}
+									enumTypes[s.Name.Name] = true
+								}
+							}
 						}
 						renames, err := languageAnnotations(doc)
 						if err != nil {
@@ -139,6 +155,20 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 							languageNames[lang]["types"][s.Name.Name] = name
 						}
 					case *ast.ValueSpec:
+						if d.Tok == token.CONST {
+							if ident, ok := s.Type.(*ast.Ident); ok {
+								lastConstType = ident.Name
+							} else if len(s.Values) > 0 {
+								lastConstType = ""
+							}
+							if lastConstType != "" {
+								for _, n := range s.Names {
+									if ast.IsExported(n.Name) {
+										enumConstants[lastConstType] = append(enumConstants[lastConstType], n.Name)
+									}
+								}
+							}
+						}
 						for _, n := range s.Names {
 							names[n.Name] = true
 						}
@@ -380,6 +410,22 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 		}
 	}
 	fmt.Fprintf(&out, "return %s, nil\n}\n", registry)
+	enumNames := make([]string, 0, len(enumTypes))
+	for name := range enumTypes {
+		enumNames = append(enumNames, name)
+	}
+	sort.Strings(enumNames)
+	for _, name := range enumNames {
+		values := enumConstants[name]
+		if len(values) == 0 {
+			return nil, fmt.Errorf("enum %s needs exported, explicitly typed constants", name)
+		}
+		fmt.Fprintf(&out, "\nfunc (%s) GobridgeEnum() map[string]%s { return map[string]%s{", name, name, name)
+		for _, value := range values {
+			fmt.Fprintf(&out, "%q:%s,", value, value)
+		}
+		fmt.Fprint(&out, "} }\n")
+	}
 	return format.Source(out.Bytes())
 }
 
