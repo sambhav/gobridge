@@ -45,7 +45,7 @@ def main():
             wheel = next(dist.glob("*.whl"))
             with zipfile.ZipFile(wheel) as archive:
                 metadata = archive.read(f"acme_greeter-{python_version}.dist-info/METADATA").decode()
-                assert f"Version: {python_version}\n" in metadata
+                assert f"Version: {python_version}" in metadata.splitlines()
             tgz = next((dist / "npm").glob("*.tgz"))
             with tarfile.open(tgz) as archive:
                 assert json.load(archive.extractfile("package/package.json"))["version"] == canonical
