@@ -267,3 +267,22 @@ func (e *Example) Value()int{return 0}
 		t.Fatal(err)
 	}
 }
+
+func TestStreamYieldIsNotAnInput(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "stream.go", `package stream
+import "context"
+//gobridge:export
+func Count(ctx context.Context, n int, yield func(int) error) error { return yield(n) }
+`)
+	if err := Generate(dir, "zz_gobridge.gen.go"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "zz_gobridge.gen.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"count", Count, "n"`) || strings.Contains(string(data), `"yield"`) {
+		t.Fatal(string(data))
+	}
+}

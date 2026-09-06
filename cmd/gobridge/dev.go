@@ -264,7 +264,13 @@ func buildDev(ctx context.Context, options devOptions, log io.Writer) error {
 		data, _ := json.Marshal(options.selectedModule.Python.Rename)
 		namesJSON = string(data)
 	}
-	generate := exec.CommandContext(ctx, binary, "generate-python", "--class", options.Class, "--binary", stem, "--names", namesJSON)
+	var prefix []string
+	if options.selectedModule != nil {
+		prefix = options.selectedModule.CommandPrefix
+	}
+	prefixJSON, _ := json.Marshal(prefix)
+	args := append(append([]string{}, prefix...), "generate-python", "--class", options.Class, "--binary", stem, "--names", namesJSON, "--command-prefix", string(prefixJSON))
+	generate := exec.CommandContext(ctx, binary, args...)
 	generate.Stderr = log
 	bindings, err := generate.Output()
 	if err != nil {

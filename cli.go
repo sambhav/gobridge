@@ -227,6 +227,7 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 		flags.SetOutput(stderr)
 		class := flags.String("class", "Service", "Python client class name")
 		binary := flags.String("binary", "service", "bundled executable name")
+		prefixJSON := flags.String("command-prefix", "[]", "JSON argv prefix for an embedded bridge subcommand")
 		namesJSON := flags.String("names", "{}", "JSON class/operations/types/fields naming overrides")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
@@ -234,16 +235,21 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 		if flags.NArg() != 0 {
 			return fmt.Errorf("unexpected arguments")
 		}
+		var prefix []string
+		if err := json.Unmarshal([]byte(*prefixJSON), &prefix); err != nil {
+			return err
+		}
 		var names Names
 		if err := json.Unmarshal([]byte(*namesJSON), &names); err != nil {
 			return err
 		}
-		return r.GeneratePython(out, *class, *binary, WithPython(names))
+		return r.GeneratePython(out, *class, *binary, WithPython(names), WithCommandPrefix(prefix...))
 	case "generate-typescript":
 		flags := flag.NewFlagSet("generate-typescript", flag.ContinueOnError)
 		flags.SetOutput(stderr)
 		class := flags.String("class", "Service", "TypeScript client class name")
 		binary := flags.String("binary", "service", "bundled executable name")
+		prefixJSON := flags.String("command-prefix", "[]", "JSON argv prefix for an embedded bridge subcommand")
 		namesJSON := flags.String("names", "{}", "JSON class/operations/types/fields naming overrides")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
@@ -251,11 +257,15 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 		if flags.NArg() != 0 {
 			return fmt.Errorf("unexpected arguments")
 		}
+		var prefix []string
+		if err := json.Unmarshal([]byte(*prefixJSON), &prefix); err != nil {
+			return err
+		}
 		var names Names
 		if err := json.Unmarshal([]byte(*namesJSON), &names); err != nil {
 			return err
 		}
-		return r.GenerateTypeScript(out, *class, *binary, WithTypeScript(names))
+		return r.GenerateTypeScript(out, *class, *binary, WithTypeScript(names), WithCommandPrefix(prefix...))
 	}
 	op, ok := r.ops[args[0]]
 	if !ok {

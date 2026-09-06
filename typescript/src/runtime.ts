@@ -409,6 +409,24 @@ export class Client implements AsyncDisposable {
     return transport.submit(method, params, timeoutMs, options.signal);
   }
 
+  async batch(calls: readonly {method: string; params?: unknown}[], options: CallOptions = {}): Promise<readonly {result: unknown; error?: BridgeError}[]> {
+    const results = await this.call("$batch", {calls}, options) as {result: unknown; error?: unknown}[];
+    return results.map(result => result.error === undefined ? {result: result.result} : {result: null, error: errorFromWire(result.error)});
+  }
+
+  async *stream(method: string, params: unknown = {}, options: CallOptions = {}): AsyncGenerator<unknown> {
+    const {cursor} = await this.call("$stream_open", {method, params}, options) as {cursor: string};
+    try {
+      while (true) {
+        const result = await this.call("$stream_next", {cursor}, options) as {done: boolean; item: unknown};
+        if (result.done) return;
+        yield result.item;
+      }
+    } finally {
+      try { await this.call("$stream_close", {cursor}, {timeoutMs: options.timeoutMs ?? 1000}); } catch { /* Session close also releases streams. */ }
+    }
+  }
+
   async close(): Promise<void> {
     this.#closed = true;
     finalizers.unregister(this);

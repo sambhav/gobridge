@@ -50,7 +50,7 @@ func TestCompactHelloPreservesIdentityWithoutConstructing(t *testing.T) {
 func TestDirectResponseEncodingMatchesJSONEnvelope(t *testing.T) {
 	for _, response := range []Response{
 		{ID: "1", Result: nil}, {ID: "<&\"", Result: map[string]any{"text": "<&\u2028", "nil": nil}},
-		{ID: "2", Error: &Error{"invalid_argument", "bad input"}},
+		{ID: "2", Error: &Error{Code: "invalid_argument", Message: "bad input"}},
 	} {
 		want, err := json.Marshal(response)
 		if err != nil {

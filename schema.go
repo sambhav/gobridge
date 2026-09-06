@@ -29,7 +29,7 @@ var pythonReserved = func() map[string]bool {
 	for n := range pythonKeywords {
 		m[n] = true
 	}
-	for _, n := range strings.Fields("call acall close aclose start lifecycle control aio RuntimeOptions DefaultControl _client command timeout max_pending expected_schema serve schema help generate_python generate_typescript") {
+	for _, n := range strings.Fields("batch abatch stream astream call acall close aclose start lifecycle control aio RuntimeOptions DefaultControl _client command timeout max_pending expected_schema serve schema help generate_python generate_typescript") {
 		m[n] = true
 	}
 	return m
@@ -245,6 +245,7 @@ type Field struct {
 	Constraints                *Constraints `json:"constraints,omitempty"`
 }
 type Operation struct {
+	Stream      bool   `json:"stream,omitempty"`
 	PublicName  string `json:"public_name,omitempty"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -290,7 +291,7 @@ func (r *Registry) Schema() Schema {
 	s := Schema{Protocol: 1, Operations: []Operation{}}
 	for _, n := range r.names() {
 		op := r.ops[n]
-		s.Operations = append(s.Operations, Operation{Name: n, Description: op.description, Input: op.inputSchema(), Output: describe(op.out)})
+		s.Operations = append(s.Operations, Operation{Stream: op.stream != nil, Name: n, Description: op.description, Input: op.inputSchema(), Output: describe(op.out)})
 	}
 	data, _ := json.Marshal(s.Operations)
 	if r.constructor != nil {

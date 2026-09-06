@@ -33,6 +33,12 @@ func compileBinding(name string, fn reflect.Value, receiver func() reflect.Value
 		return operation{}, fmt.Errorf("expected a non-nil function")
 	}
 	t := fn.Type()
+	if t.NumIn() > 0 && t.NumOut() == 1 && t.Out(0) == errorType && !t.IsVariadic() {
+		last := t.In(t.NumIn() - 1)
+		if last.Kind() == reflect.Func && last.NumIn() == 1 && last.NumOut() == 1 && last.Out(0) == errorType && !last.IsVariadic() {
+			return compileStreamBinding(name, fn, receiver, paramNames)
+		}
+	}
 	if t.IsVariadic() {
 		return operation{}, fmt.Errorf("variadic functions need an explicit slice adapter")
 	}

@@ -1,7 +1,7 @@
 // Package catalog demonstrates exported functional options and language names.
 package catalog
 
-import "fmt"
+import "github.com/sambhav/gobridge"
 
 // Catalog owns an immutable configured endpoint.
 //
@@ -33,7 +33,7 @@ func WithEndpoint(endpoint string) Option { return func(c *Catalog) { c.endpoint
 //gobridge:option retries
 func WithRetries(retries int) (Option, error) {
 	if retries < 0 {
-		return nil, fmt.Errorf("retries must be non-negative")
+		return nil, gobridge.Failure("invalid_argument", "retries must be non-negative")
 	}
 	return func(c *Catalog) { c.retries = retries }, nil
 }
@@ -58,7 +58,7 @@ func (c *Catalog) Echo(status Status) Status { return status }
 //gobridge:option retry
 func WithRetry(attempts int, delayMs int) (Option, error) {
 	if attempts < 0 || delayMs < 0 {
-		return nil, fmt.Errorf("retry values must be non-negative")
+		return nil, gobridge.Failure("invalid_argument", "retry values must be non-negative")
 	}
 	return func(c *Catalog) { c.retries = attempts; c.delayMs = delayMs }, nil
 }

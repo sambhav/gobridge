@@ -442,6 +442,9 @@ func parameters(fields *ast.FieldList, contextAlias string) ([]string, error) {
 		return names, nil
 	}
 	for i, field := range fields.List {
+		if callback, ok := field.Type.(*ast.FuncType); ok && i == len(fields.List)-1 && contextAlias != "" && len(resultTypes(callback.Params)) == 1 && len(resultTypes(callback.Results)) == 1 && isIdent(resultTypes(callback.Results)[0], "error") {
+			continue
+		}
 		if _, ok := field.Type.(*ast.Ellipsis); ok {
 			return nil, fmt.Errorf("variadic parameters need an explicit slice wrapper")
 		}

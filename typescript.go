@@ -22,7 +22,7 @@ var typescriptReserved = func() map[string]bool {
 
 var typescriptMethodReserved = func() map[string]bool {
 	m := map[string]bool{}
-	for _, name := range strings.Fields("constructor prototype then call start close schema control toString toLocaleString valueOf hasOwnProperty isPrototypeOf propertyIsEnumerable") {
+	for _, name := range strings.Fields("constructor prototype then batch stream call start close schema control toString toLocaleString valueOf hasOwnProperty isPrototypeOf propertyIsEnumerable") {
 		m[name] = true
 	}
 	return m
@@ -259,7 +259,11 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string, options
 	if schema.Constructor == nil {
 		fmt.Fprintf(&b, "    _bridgeEncode({ kind: \"struct\", name: %s, fields: [] }, _bridgeConfig);\n", tsQuote(optionsName))
 	}
-	fmt.Fprintf(&b, "    super(_bridgeOptions.command ?? _bridgeResolveBinary(import.meta.url, %s), {\n", tsQuote(binary))
+	prefixJSON, _ := json.Marshal(r.generationPrefix(options))
+	if string(prefixJSON) == "null" {
+		prefixJSON = []byte("[]")
+	}
+	fmt.Fprintf(&b, "    super(_bridgeOptions.command ?? [_bridgeResolveBinary(import.meta.url, %s), ...%s], {\n", tsQuote(binary), prefixJSON)
 	fmt.Fprintln(&b, "      ..._bridgeOptions,\n      expectedSchema: schema.schema_hash,")
 	if schema.Constructor != nil {
 		fmt.Fprintln(&b, "      init: _bridgeEncode(schema.constructor!, _bridgeConfig),")
@@ -272,6 +276,11 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string, options
 		if len(op.Input.Fields) > 0 {
 			params = "params: " + op.Input.Name + ", " + params
 			input = "params"
+		}
+		if op.Stream {
+			fmt.Fprintf(&b, "  async *%s(%s): AsyncGenerator<%s> {\n", tsOperationName(op), params, tsType(op.Output))
+			fmt.Fprintf(&b, "    for await (const item of super.stream(%s, _bridgeInput%d.encode(%s), options)) { yield _bridgeOutput%d.decode(item); }\n  }\n\n", tsQuote(op.Name), index, input, index)
+			continue
 		}
 		fmt.Fprintf(&b, "  async %s(%s): Promise<%s> {\n", tsOperationName(op), params, tsType(op.Output))
 		fmt.Fprintf(&b, "    const _bridgeResult = await super.call(%s, _bridgeInput%d.encode(%s), options);\n", tsQuote(op.Name), index, input)
@@ -290,7 +299,11 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string, options
 			params = "params: " + op.Input.Name + ", " + params
 			args = "params, options"
 		}
-		fmt.Fprintf(&b, "export function %s(%s): Promise<%s> {\n  return _bridgeDefaults.client().%s(%s);\n}\n\n", tsOperationName(op), params, tsType(op.Output), tsOperationName(op), args)
+		returnType := "Promise"
+		if op.Stream {
+			returnType = "AsyncGenerator"
+		}
+		fmt.Fprintf(&b, "export function %s(%s): %s<%s> {\n  return _bridgeDefaults.client().%s(%s);\n}\n\n", tsOperationName(op), params, returnType, tsType(op.Output), tsOperationName(op), args)
 	}
 	_, err = io.WriteString(w, b.String())
 	return err

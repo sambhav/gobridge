@@ -1,5 +1,5 @@
 export class BridgeError extends Error {
-  constructor(readonly code: string, readonly message: string) {
+  constructor(readonly code: string, readonly message: string, readonly details: Readonly<Record<string, string>> = {}) {
     super(`${code}: ${message}`);
     this.name = new.target.name;
   }
@@ -25,5 +25,7 @@ export function errorFromWire(value: unknown): BridgeError {
     cancelled: AbortError,
   };
   const Constructor = Object.hasOwn(constructors, value.code) ? constructors[value.code]! : BridgeError;
-  return new Constructor(value.code, value.message);
+  const details = "details" in value ? value.details : {};
+  if (typeof details !== "object" || details === null || Array.isArray(details) || Object.values(details).some(v => typeof v !== "string")) throw new DaemonError("protocol", "invalid error details");
+  return new Constructor(value.code, value.message, details as Record<string,string>);
 }

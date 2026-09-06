@@ -73,7 +73,8 @@ def resolve_binary(module_file: str, name: str) -> str:
 
 
 class BridgeError(Exception):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, details=None):
+        self.details = {} if details is None else dict(details)
         self.code, self.message = code, message
         super().__init__(f"{code}: {message}")
 
@@ -110,7 +111,10 @@ def _error(data):
         raise ValueError("invalid daemon error envelope")
     cls = {"invalid_argument": InvalidArgumentError, "busy": BusyError,
            "deadline_exceeded": RequestTimeout}.get(data["code"], BridgeError)
-    return cls(data["code"], data["message"])
+    details = data.get("details", {})
+    if not isinstance(details, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in details.items()):
+        raise ValueError("invalid daemon error details")
+    return cls(data["code"], data["message"], details)
 
 
 def _json_default(value):
@@ -509,6 +513,45 @@ class Client:
         except BaseException:
             t.cancel(request_id)
             raise
+
+    def batch(self, calls, *, timeout=None):
+        """Run up to 128 {method, params} calls in order; errors are per entry."""
+        results = self.call("$batch", {"calls": calls}, timeout=timeout)
+        return [{**item, "error": _error(item["error"])} if "error" in item else item for item in results]
+
+    async def abatch(self, calls, *, timeout=None):
+        results = await self.acall("$batch", {"calls": calls}, timeout=timeout)
+        return [{**item, "error": _error(item["error"])} if "error" in item else item for item in results]
+
+    def stream(self, method, params=None, *, timeout=None):
+        """Pull items lazily. Close the iterator when abandoning it early."""
+        cursor = self.call("$stream_open", {"method": method, "params": params or {}}, timeout=timeout)["cursor"]
+        try:
+            while True:
+                result = self.call("$stream_next", {"cursor": cursor}, timeout=timeout)
+                if result["done"]:
+                    return
+                yield result["item"]
+        finally:
+            try:
+                self.call("$stream_close", {"cursor": cursor}, timeout=timeout)
+            except (BridgeError, OSError):
+                pass
+
+    async def astream(self, method, params=None, *, timeout=None):
+        """Async pull stream; use contextlib.aclosing for early loop exits."""
+        cursor = (await self.acall("$stream_open", {"method": method, "params": params or {}}, timeout=timeout))["cursor"]
+        try:
+            while True:
+                result = await self.acall("$stream_next", {"cursor": cursor}, timeout=timeout)
+                if result["done"]:
+                    return
+                yield result["item"]
+        finally:
+            try:
+                await self.acall("$stream_close", {"cursor": cursor}, timeout=timeout)
+            except (BridgeError, OSError):
+                pass
 
     async def acall(self, method: str, params: dict | None = None, *, timeout: float | None = None):
         # Cold process startup/handshake runs off the event loop. Shield it so

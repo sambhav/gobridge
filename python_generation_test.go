@@ -90,7 +90,7 @@ def decode(cls, value):
     elif cls is str:
         assert type(value) is str
     return value
-def resolve_binary(path, stem): return ["bundled-" + stem]
+def resolve_binary(path, stem): return "bundled-" + stem
 for name in ("RuntimeOptions", "Client", "DefaultControl", "decode", "resolve_binary"):
     setattr(bridge, name, globals()[name])
 bridge.require_sync = lambda: None

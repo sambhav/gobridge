@@ -185,3 +185,19 @@ func (r *Registry) bindingSchema(language, class string, options []Option) (Sche
 	}
 	return schema, class, nil
 }
+
+// WithCommandPrefix locates the bridge subcommand inside an existing binary.
+// The runtime appends "serve"; generation commands use the same prefix.
+func WithCommandPrefix(args ...string) Option {
+	snapshot := append([]string(nil), args...)
+	return func(r *Registry) { r.commandPrefix = append([]string(nil), snapshot...) }
+}
+func (r *Registry) generationPrefix(options []Option) []string {
+	config := New(WithCommandPrefix(r.commandPrefix...))
+	for _, option := range options {
+		if option != nil {
+			option(config)
+		}
+	}
+	return config.commandPrefix
+}

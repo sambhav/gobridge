@@ -24,22 +24,24 @@ type moduleTarget struct {
 	Rename  bridge.Names `json:"rename,omitempty"`
 }
 type module struct {
-	Name       string       `json:"name"`
-	Source     string       `json:"source,omitempty"`
-	Command    string       `json:"command"`
-	Python     moduleTarget `json:"python,omitempty"`
-	TypeScript moduleTarget `json:"typescript,omitempty"`
+	CommandPrefix []string     `json:"command_prefix,omitempty"`
+	Name          string       `json:"name"`
+	Source        string       `json:"source,omitempty"`
+	Command       string       `json:"command"`
+	Python        moduleTarget `json:"python,omitempty"`
+	TypeScript    moduleTarget `json:"typescript,omitempty"`
 }
 
 // Resolved modules are passed to the packagers, keeping CLI overrides and
 // defaults in one place. Each module owns its executable and lifecycle.
 type resolvedModule struct {
-	Name       string       `json:"name"`
-	Source     string       `json:"source,omitempty"`
-	Command    string       `json:"command"`
-	Binary     string       `json:"binary"`
-	Python     moduleTarget `json:"python"`
-	TypeScript moduleTarget `json:"typescript"`
+	CommandPrefix []string     `json:"command_prefix,omitempty"`
+	Name          string       `json:"name"`
+	Source        string       `json:"source,omitempty"`
+	Command       string       `json:"command"`
+	Binary        string       `json:"binary"`
+	Python        moduleTarget `json:"python"`
+	TypeScript    moduleTarget `json:"typescript"`
 }
 
 func (p project) resolveModules() ([]resolvedModule, error) {
@@ -49,6 +51,11 @@ func (p project) resolveModules() ([]resolvedModule, error) {
 	for _, m := range modules {
 		if m.Name == "" || seen["name:"+m.Name] {
 			return nil, fmt.Errorf("missing or duplicate module name %q", m.Name)
+		}
+		for _, arg := range m.CommandPrefix {
+			if strings.ContainsRune(arg, 0) {
+				return nil, fmt.Errorf("module %s: command_prefix must not contain NUL", m.Name)
+			}
 		}
 		seen["name:"+m.Name] = true
 		if m.Python.Module == "" {
@@ -98,7 +105,7 @@ func (p project) resolveModules() ([]resolvedModule, error) {
 		}
 		m.Python.Rename.Class = pythonClass
 		m.TypeScript.Rename.Class = typescriptClass
-		result = append(result, resolvedModule{Name: m.Name, Source: m.Source, Command: m.Command, Binary: check.binaryName(), Python: m.Python, TypeScript: m.TypeScript})
+		result = append(result, resolvedModule{CommandPrefix: m.CommandPrefix, Name: m.Name, Source: m.Source, Command: m.Command, Binary: check.binaryName(), Python: m.Python, TypeScript: m.TypeScript})
 	}
 	return result, nil
 }

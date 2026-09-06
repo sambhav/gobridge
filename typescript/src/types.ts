@@ -19,6 +19,7 @@ export interface WireType {
   readonly fields?: readonly Field[];
 }
 export interface Operation {
+  readonly stream?: boolean;
   readonly name: string;
   readonly description: string;
   readonly input: WireType;

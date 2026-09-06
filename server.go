@@ -48,6 +48,8 @@ func (r *Registry) Serve(parent context.Context, in io.Reader, out io.Writer, ma
 	}
 	ctx, cancelAll := context.WithCancel(parent)
 	defer cancelAll()
+	streams := &streamSession{ctx: ctx, registry: r, limit: maxConcurrent, cursors: map[string]*streamCursor{}}
+	defer streams.closeAll()
 	var mu, writeMu sync.Mutex
 	active := map[string]context.CancelFunc{}
 	write := func(resp Response) {
@@ -55,7 +57,7 @@ func (r *Registry) Serve(parent context.Context, in io.Reader, out io.Writer, ma
 		// Response would scan and copy that entire encoded payload a second time.
 		data, err := resp.MarshalJSON()
 		if err != nil || len(data) > MaxFrame {
-			data, _ = (Response{ID: resp.ID, Error: &Error{"resource_exhausted", "response cannot be encoded within frame limit"}}).MarshalJSON()
+			data, _ = (Response{ID: resp.ID, Error: &Error{Code: "resource_exhausted", Message: "response cannot be encoded within frame limit"}}).MarshalJSON()
 		}
 		writeMu.Lock()
 		defer writeMu.Unlock()
@@ -100,12 +102,12 @@ func (r *Registry) Serve(parent context.Context, in io.Reader, out io.Writer, ma
 		}
 		if len(active) >= maxConcurrent {
 			mu.Unlock()
-			write(Response{ID: req.ID, Error: &Error{"busy", "too many concurrent requests"}})
+			write(Response{ID: req.ID, Error: &Error{Code: "busy", Message: "too many concurrent requests"}})
 			continue
 		}
 		if req.TimeoutMS < 0 || req.TimeoutMS > 86400000 {
 			mu.Unlock()
-			write(Response{ID: req.ID, Error: &Error{"invalid_argument", "timeout must be 0..86400000 ms"}})
+			write(Response{ID: req.ID, Error: &Error{Code: "invalid_argument", Message: "timeout must be 0..86400000 ms"}})
 			continue
 		}
 		var callCtx context.Context
@@ -115,13 +117,25 @@ func (r *Registry) Serve(parent context.Context, in io.Reader, out io.Writer, ma
 		} else {
 			callCtx, callCancel = context.WithCancel(ctx)
 		}
+		callCtx = context.WithValue(callCtx, requestIDKey{}, req.ID)
 		active[req.ID] = callCancel
 		mu.Unlock()
 		go func(req Request, c context.Context, stop context.CancelFunc) {
 			defer stop()
 			var result any
 			var err error
-			if req.Method == "$hello" {
+			if req.Method == "$batch" {
+				var batch struct {
+					Calls []BatchCall `json:"calls"`
+				}
+				if decodeErr := json.Unmarshal(req.Params, &batch); decodeErr != nil {
+					err = Failure("invalid_argument", "invalid batch request")
+				} else {
+					result, err = r.Batch(c, batch.Calls)
+				}
+			} else if req.Method == "$stream_open" || req.Method == "$stream_next" || req.Method == "$stream_close" {
+				result, err = streams.invoke(c, req.Method, req.Params)
+			} else if req.Method == "$hello" {
 				result, err = r.hello(req.Params)
 			} else if req.Method == "$init" {
 				err = r.Initialize(c, req.Params)

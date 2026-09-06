@@ -12,6 +12,7 @@ performance measurements and their reproduction commands.
 [Names](#names-in-go-source) · [Constructors](#constructors-and-functional-options) ·
 [Build and publish](#build-and-publish) · [Development](#development) ·
 [State and sessions](#share-state-deliberately) · [Types](#types-validation-and-runtime-settings) ·
+[Streaming and batches](#streaming-and-batches) · [Errors and logging](#errors-and-observability) ·
 [Manual registration](#manual-registration) · [Migration](#breaking-api-changes)
 
 ## Quick start
@@ -592,6 +593,148 @@ the shipped host only needs the daemon command. The complete
 It is a separate Go module so the core library has no Cobra dependency.
 
 
+## Embedded generation and packaging
+
+For an existing binary, mount `registry.Run` underneath a private subcommand and
+forward its remaining arguments and streams. For example, a Cobra command can use:
+
+```go
+bridgeCommand := &cobra.Command{
+    Use: "bridge", Hidden: true, DisableFlagParsing: true,
+    RunE: func(cmd *cobra.Command, args []string) error {
+        return registry.Run(cmd.Context(), args,
+            cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
+    },
+}
+root.AddCommand(bridgeCommand)
+```
+
+Set the module's `"command_prefix": ["bridge"]` in `gobridge.json`. Build and dev
+invoke `host bridge generate-python` or `host bridge generate-typescript`; generated
+clients launch `host bridge serve` automatically. Prefixes are argv arrays, never
+shell strings. Each module may select a different subcommand in the same host.
+Generation builds the host but never initializes the registered receiver.
+Avoid running application startup side effects before routing tooling commands.
+
+When generating directly in Go, pass `WithCommandPrefix("bridge")` to
+`GeneratePython` or `GenerateTypeScript`. Explicit runtime `command` overrides
+still supply the complete executable/prefix; the runtime appends `serve`.
+Hosts that expose only `Serve` can keep doing so, but packaging needs generation
+commands too. The preceding Cobra example demonstrates the narrower serving-only
+mount; this mount exposes the registry's tooling and operation commands privately.
+
+## Streaming and batches
+
+A producer takes a leading context and a final `yield func(T) error` parameter,
+then returns `error`. `Bind` recognizes this shape and source generation omits
+`yield` from public inputs. Receiver methods work with `NewObject` too.
+
+```go
+//gobridge:export
+func Count(ctx context.Context, n int, yield func(int64) error) error {
+    for i := 0; i < n; i++ {
+        if err := yield(int64(i)); err != nil { return err }
+    }
+    return nil
+}
+```
+
+`RegisterStream[I, T](registry, name, description, producer)` provides the typed
+registration path with a named input struct. Generated Python returns a typed
+async iterator (or synchronous iterator from `SyncService`/`count_sync`), and
+TypeScript returns `AsyncGenerator<T>`:
+
+```python
+from contextlib import aclosing
+
+async with aclosing(client.count(n=100)) as items:
+    async for item in items:
+        print(item)
+        if item == 5:
+            break
+```
+
+```typescript
+for await (const item of client.count({n: 100})) {
+  console.log(item);
+  if (item === 5n) break;
+}
+```
+
+Use `contextlib.closing` for early exits from synchronous Python iterators.
+Full exhaustion, explicit iterator closure, and session shutdown release the
+producer. TypeScript `for await` closes on `break`; Python needs the closing scope.
+Producers must honor context cancellation and stop on yield errors, including
+while doing work between yields.
+
+Streams use pull requests on the existing multiplexed transport: one item per
+read, no growing item queue. Open streams are limited to the server's concurrency
+limit; idle streams expire after 30 seconds. A single read is also limited to 30
+seconds by that lease, even if its call timeout is longer. A canceled read closes
+its stream. Each item retains the 1 MiB frame limit. This first implementation is
+server-to-client streaming; it does not expose arbitrary channels, client streams,
+or bidirectional streams. Errors can arrive after earlier items were delivered.
+
+For a batch, use `client.batch(calls)` in synchronous Python/TypeScript, or
+`await client.abatch(calls)` in async Python. TypeScript `batch` returns a Promise.
+The Go equivalent is `registry.Batch(ctx, calls)`.
+
+```python
+results = await client.abatch([
+    {"method": "lookup", "params": {"id": "first"}},
+    {"method": "lookup", "params": {"id": "second"}},
+])
+for result in results:
+    if "error" in result:
+        print(result["error"].code)
+    else:
+        print(result["result"])
+```
+
+Batches use stable **wire names** and wire-shaped parameters; results remain wire
+values rather than generated dataclasses. Errors are `BridgeError` instances with
+code/message/details in both languages. At most 128 unary calls execute in input
+order, in one round trip. Individual failures allow subsequent calls to run.
+Cancellation prevents remaining handlers from starting; a response-budget overflow
+marks remaining calls as unexecuted. Batches are not atomic and never roll back
+or replay effects. Streaming operations cannot be nested in a batch.
+
+## Errors and observability
+
+Return `gobridge.Failure(code, message)` for intentional public errors. Use
+`&gobridge.Error{Code: "invalid_argument", Message: "Unknown region",
+Details: map[string]string{"field": "region"}}` when clients need structured
+context. Wrapped bridge errors retain their code and details. Python and TypeScript
+exceptions expose `.code`, `.message`, and `.details`; existing standard error
+subclasses continue to work.
+
+Ordinary Go errors become `internal: internal operation error` at the transport
+boundary. Their original messages are available only to the host observer. Panic
+responses are similarly generic. This is an intentional behavior change: explicitly
+mark user-facing messages, including constructor/factory validation failures.
+
+```go
+registry, err := greeter.NewGobridge(
+    gobridge.WithLogger(slog.New(slog.NewJSONHandler(os.Stderr, nil))),
+    gobridge.WithObserver(func(ctx context.Context, event gobridge.CallEvent) {
+        // Update your metrics/traces here; event.Err is the original Go error.
+    }),
+)
+```
+
+Completion events include method, request ID, duration and status code. Unary
+calls, constructor initialization and stream producer completion are observed.
+`gobridge.RequestID(ctx)` lets handlers correlate their own logs. Stream duration
+covers the producer lifetime; batch members share the enclosing request ID.
+Observer callbacks must be concurrency-safe and nonblocking; panics are isolated.
+No telemetry SDK dependency is required. Admission failures and malformed protocol
+frames are not operation-completion events.
+
+The logger emits successes at debug and failures at warning. It excludes arguments,
+results, constructor data and raw errors. Enable debug on the handler when needed.
+Keep logs on stderr: stdout is reserved for protocol frames. Client subprocesses
+inherit stderr, so logs reach the parent application's normal logging destination.
+
 ## Types, validation, and runtime settings
 
 Supported values are strings, booleans, signed integers, finite floats, named
@@ -644,7 +787,11 @@ Protect mutable Go receivers as you would for goroutines. The optional `Memo`
 cache supplies bounded TTL/LRU storage and coalesces loads per key. One waiter's
 cancellation leaves other waiters running; the last cancellation stops the loader
 context. Errors are not cached. Keep cached reference-containing values immutable
-or copy them. Reuse clients and batch useful work to amortize IPC.
+or copy them. `memo.Delete(key)` and `memo.Clear()` invalidate cached results.
+Invalidation detaches in-flight loaders: current waiters may finish, but their
+results cannot repopulate invalidated entries. Cache keys must include all inputs
+and identity boundaries; caches live in the Go process and are not shared across
+client processes. Reuse clients and batch useful work to amortize IPC.
 
 For test commands, protocol details, measurements and release work, see
 [Contributing](CONTRIBUTING.md).

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"time"
 )
 
 type constructor struct {
@@ -165,6 +166,11 @@ func (r *Registry) NeedsInit() bool {
 // attempts cannot be retried: constructors may have irreversible side effects.
 // A new client process provides a fresh initialization attempt.
 func (r *Registry) Initialize(ctx context.Context, config json.RawMessage) (err error) {
+	var started time.Time
+	if r.logger != nil || r.observer != nil {
+		started = time.Now()
+	}
+	defer func() { r.observe(ctx, "$init", started, err) }()
 	r.initMu.Lock()
 	defer r.initMu.Unlock()
 	defer func() {

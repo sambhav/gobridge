@@ -113,8 +113,8 @@ def main():
             else:
                 build_go_binary(host, module["command"], project, host_env, cache=args.build_cache)
             host.chmod(0o755)
-            bindings = subprocess.check_output([str(host), "generate-typescript", "--class", config["class"],
-                "--binary", module["binary"], "--names", json.dumps(config.get("rename", {}))])
+            bindings = subprocess.check_output([str(host), *module.get("command_prefix", []), "generate-typescript", "--class", config["class"],
+                "--binary", module["binary"], "--command-prefix", json.dumps(module.get("command_prefix", [])), "--names", json.dumps(config.get("rename", {}))])
             shutil.copytree(RUNTIME / "src", directory / "_gobridge")
             module_custom = copy_package(project, config.get("package", ""), directory)
             custom = custom or module_custom

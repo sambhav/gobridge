@@ -141,8 +141,8 @@ def main():
             host_env["CGO_ENABLED"] = "0"
             build_go_binary(host, module["command"], PROJECT, host_env, cache=args.build_cache)
             host.chmod(0o755)
-            bindings = subprocess.check_output([str(host), "generate-python", "--class", target_config["class"],
-                "--binary", module["binary"], "--names", json.dumps(target_config.get("rename", {}))])
+            bindings = subprocess.check_output([str(host), *module.get("command_prefix", []), "generate-python", "--class", target_config["class"],
+                "--binary", module["binary"], "--command-prefix", json.dumps(module.get("command_prefix", [])), "--names", json.dumps(target_config.get("rename", {}))])
             prepared.append((module, bindings))
         for target in args.targets:
             goos, goarch, tag = TARGETS[target]

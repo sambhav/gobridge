@@ -109,3 +109,24 @@ func (m *Memo[K, V]) Get(ctx context.Context, key K, load func(context.Context) 
 		return f.value, f.err
 	}
 }
+
+// Delete invalidates a key and detaches any current loader. Existing waiters
+// may finish, but that loader cannot repopulate the cache after invalidation.
+func (m *Memo[K, V]) Delete(key K) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if e := m.items[key]; e != nil {
+		m.lru.Remove(e)
+		delete(m.items, key)
+	}
+	delete(m.flights, key)
+}
+
+// Clear invalidates all values and detaches in-flight loads from future reads.
+func (m *Memo[K, V]) Clear() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lru.Init()
+	clear(m.items)
+	clear(m.flights)
+}
