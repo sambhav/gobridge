@@ -6,6 +6,21 @@ import shutil
 import subprocess
 
 
+def application_version(version):
+    """Validate canonical application SemVer; return its Python distribution form."""
+    parts = re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(alpha|beta|rc)\.(0|[1-9][0-9]*))?", version)
+    if parts is None:
+        raise ValueError("version must be X.Y.Z or X.Y.Z-{alpha,beta,rc}.N (for example 1.2.3-rc.1); no leading zeros or build metadata")
+    for index in (1, 2, 3, 5):
+        value = parts[index]
+        if value is not None and (len(value) > 16 or int(value) > 9007199254740991):
+            raise ValueError("version components must be at most 9007199254740991 (npm's safe integer limit)")
+    result = ".".join(parts.group(1, 2, 3))
+    if parts[4]:
+        result += {"alpha": "a", "beta": "b", "rc": "rc"}[parts[4]] + parts[5]
+    return result
+
+
 def build_go_binary(destination, package, project, env, *, cache=None, trimpath=False):
     """Reuse link outputs, while Go still validates source/flags on every build."""
     destination = Path(destination)

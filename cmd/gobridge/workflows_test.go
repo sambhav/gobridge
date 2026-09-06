@@ -72,7 +72,7 @@ func TestBuildValidationBeforeGeneration(t *testing.T) {
 	inDirectory(t, dir)
 	writeTestFile(t, "gobridge.json", `{"name":"acme.greeter","source":".","command":"."}`)
 	writeTestFile(t, "main.go", "package main\n//gobridge:export\nfunc Greet()string{return \"hello\"}\nfunc main(){}\n")
-	for _, args := range [][]string{{"--targets", "bogus"}, {"--version", "01.2.3"}, {"--distribution", "bad/name"}, {"--typescript", "--npm-package", "../bad"}, {"--targets", "linux-amd64,linux-amd64"}} {
+	for _, args := range [][]string{{"--targets", "bogus"}, {"--version", "01.2.3"}, {"--version", "1.2.3-rc.01"}, {"--version", "1.2.3+build"}, {"--distribution", "bad/name"}, {"--typescript", "--npm-package", "../bad"}, {"--targets", "linux-amd64,linux-amd64"}} {
 		if err := runBuild(context.Background(), args, &bytes.Buffer{}); err == nil {
 			t.Fatalf("accepted %v", args)
 		}

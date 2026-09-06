@@ -33,7 +33,7 @@ Replace `gobridge.json` with:
 | `class` | Generated client class; defaults to PascalCase from the last component, so `acme.greeter` becomes `Greeter` and `acme.text_kit` becomes `TextKit`. Flat `acme_greeter` still becomes `AcmeGreeter`. |
 | `source` | Annotated Go library directory, relative to the project root. Omit for a manually registered registry. |
 | `command` | Go command package to compile. The directory need not match the executable's generated name. |
-| `version` | Your application package version; defaults to `0.1.0`. Use a stable `X.Y.Z`; prereleases are not currently supported by the wheel builder. |
+| `version` | Your application package version; defaults to `0.1.0`. Accepts `X.Y.Z` and `X.Y.Z-alpha.N`, `X.Y.Z-beta.N`, or `X.Y.Z-rc.N`. |
 | `python_distribution` | Name used by pip/PyPI; defaults to `name` with dots and underscores replaced by hyphens. |
 | `npm_package` | Name used by npm and JS/TS imports; defaults to `name` with dots and underscores replaced by hyphens. May include an `@scope/` prefix. |
 | `repository` | Optional source repository URL included in package metadata. |
@@ -244,6 +244,47 @@ Cross-compilation uses `CGO_ENABLED=0`; cgo libraries need a custom build recipe
 application's version is independent of the gobridge module version. The runtime
 is copied from the gobridge version selected by your Go module, so rebuild your
 packages after upgrading that dependency.
+
+### Prereleases
+
+Use the same canonical version in `gobridge.json` or `--version` for both languages:
+
+| Input / npm version | Python distribution version |
+| --- | --- |
+| `1.2.3-alpha.0` | `1.2.3a0` |
+| `1.2.3-beta.1` | `1.2.3b1` |
+| `1.2.3-rc.1` | `1.2.3rc1` |
+| `1.2.3` | `1.2.3` |
+
+These spellings follow [npm SemVer](https://semver.org/spec/v2.0.0.html) and
+[Python's version specification](https://packaging.python.org/en/latest/specifications/version-specifiers/).
+For a given `X.Y.Z`, versions order as alpha, beta, rc, then stable, with numeric
+ordering within each phase (`alpha.2` precedes `alpha.10`). The build plan,
+wheel filename, `.dist-info` directory, and installed metadata use the mapped
+Python version; npm keeps the input unchanged.
+
+```sh
+gobridge build --python --typescript --version 1.2.3-rc.1 --output dist/1.2.3-rc.1
+# Preview the exact artifact names without writing files:
+gobridge build --python --typescript --version 1.2.3-rc.1 --check
+```
+
+Use lowercase `alpha`, `beta`, or `rc` with an explicit nonnegative sequence
+number. Leading zeros, `v` prefixes, Python-style input such as `1.2.3rc1`,
+arbitrary prerelease labels, epochs, dev/post releases, and `+` build/local
+metadata are rejected before compilation. Every numeric component must be at
+most `9007199254740991` to preserve npm's numeric ordering.
+
+Consumers can select a published prerelease explicitly with
+`pip install acme-greeter==1.2.3rc1` or `npm install @acme/greeter@1.2.3-rc.1`.
+When publishing an npm prerelease, use `--tag next` (or another testing tag)
+to keep it off the default `latest` channel:
+
+```sh
+npm publish ./dist/1.2.3-rc.1/npm/acme-greeter-1.2.3-rc.1.tgz --access public --tag next
+```
+
+### Publication
 
 After testing the artifacts, publish your own packages. For the `0.1.0` build
 above, with registry credentials and permission to publish the chosen names:
