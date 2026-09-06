@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/sambhav/gobridge/compare/v2.0.0...v3.0.0) (2026-09-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* streaming, typed batches, richer types and developer tooling ([#26](https://github.com/sambhav/gobridge/issues/26))
+
+### Features
+
+* streaming, typed batches, richer types and developer tooling ([#26](https://github.com/sambhav/gobridge/issues/26)) ([2692849](https://github.com/sambhav/gobridge/commit/26928493cc793e42c51335f55f2f47d8578ab6da))
+
 ## [2.0.0](https://github.com/sambhav/gobridge/compare/v1.2.0...v2.0.0) (2026-09-06)
 
 
