@@ -63,9 +63,13 @@ constraints and never overwrites a handwritten file. Only annotated declarations
 are exposed; one constructor per registry is supported.
 
 ```python
+import asyncio
 from acme.greeter import greet, greet_sync
 
-message = await greet(name="World")  # async applications/notebooks
+async def main():
+    print(await greet(name="World"))
+
+asyncio.run(main())
 # In a synchronous script: print(greet_sync(name="World"))
 ```
 
