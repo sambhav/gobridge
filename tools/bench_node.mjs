@@ -7,10 +7,12 @@ const args = process.argv.slice(2);
 const option = name => Number(args[args.indexOf('--' + name) + 1]);
 const calls = option('calls'), concurrency = option('concurrency');
 const size = option('size'), rounds = option('rounds');
+const nodes = args.includes('--nodes') ? option('nodes') : (args.includes('--nested') ? 16 : 0);
+if (!Number.isInteger(nodes) || nodes < 0 || nodes > 10000) throw Error('--nodes must be between 0 and 10000');
 const binary = process.env.GOBRIDGE_BENCH_BINARY ?? fileURLToPath(new URL('../bin/perf' + (process.platform === 'win32' ? '.exe' : ''), import.meta.url));
 const config = {_runtime: {command: binary}};
 const params = {data: new Uint8Array(size), rounds,
-  nodes: args.includes('--nested') ? Array.from({length:16}, () => ({name:'entry', values:[1n,2n,3n,4n]})) : []};
+  nodes: Array.from({length:nodes}, () => ({name:'entry', values:[1n,2n,3n,4n]}))};
 const cold = [], samples = new Array(calls);
 for (let i=0;i<10;i++) {
   const client = new Perf(config);

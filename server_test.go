@@ -2,12 +2,98 @@ package gobridge
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestCompactHelloPreservesIdentityWithoutConstructing(t *testing.T) {
+	object, calls := newTestObject(t)
+	for _, registry := range []*Registry{New(), object} {
+		full, err := registry.hello(json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		compact, err := registry.hello(json.RawMessage(`{"compact":true}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := json.Marshal(compact)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil {
+			t.Fatal(err)
+		}
+		var hash string
+		if err := json.Unmarshal(fields["schema_hash"], &hash); err != nil {
+			t.Fatal(err)
+		}
+		schema := full.(Schema)
+		if hash != schema.Hash || string(fields["protocol"]) != "1" || fields["operations"] != nil {
+			t.Fatalf("bad compact hello: %s", data)
+		}
+		if (fields["constructor"] != nil) != (schema.Constructor != nil) {
+			t.Fatalf("lost constructor presence: %s", data)
+		}
+	}
+	if calls.Load() != 0 || !object.NeedsInit() {
+		t.Fatal("hello ran constructor")
+	}
+}
+
+func TestDirectResponseEncodingMatchesJSONEnvelope(t *testing.T) {
+	for _, response := range []Response{
+		{ID: "1", Result: nil}, {ID: "<&\"", Result: map[string]any{"text": "<&\u2028", "nil": nil}},
+		{ID: "2", Error: &Error{"invalid_argument", "bad input"}},
+	} {
+		want, err := json.Marshal(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := response.MarshalJSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("%s != %s", got, want)
+		}
+	}
+}
+
+func TestCompactHelloFitsWhenFullSchemaExceedsFrameLimit(t *testing.T) {
+	r, calls := newTestObject(t)
+	if err := r.Describe("add", strings.Repeat("x", MaxFrame)); err != nil {
+		t.Fatal(err)
+	}
+	full, err := r.hello(json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullData, err := (Response{ID: "1", Result: full}).MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact, err := r.hello(json.RawMessage(`{"compact":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compactData, err := (Response{ID: "2", Result: compact}).MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fullData) <= MaxFrame || len(compactData) > MaxFrame {
+		t.Fatal("unexpected handshake sizes", len(fullData), len(compactData))
+	}
+	if calls.Load() != 0 {
+		t.Fatal("hello initialized the object")
+	}
+}
 
 func TestServerCancellationBusyAndEOF(t *testing.T) {
 	r := New()

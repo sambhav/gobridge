@@ -1,5 +1,8 @@
 # Performance and lifecycle verification
 
+For prewarming, batching, startup costs, and dependency-free format comparisons,
+see [Startup and transport](startup-and-transport.md).
+
 Run from a checkout with Go 1.23+, Python 3.10+, Node 24+, and the TypeScript
 compiler dependencies installed:
 

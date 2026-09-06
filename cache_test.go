@@ -86,7 +86,7 @@ func TestMemoLastWaiterCancelsAndFailureNotCached(t *testing.T) {
 	}
 }
 func TestMemoCapacityAndTTL(t *testing.T) {
-	m := NewMemo[int, int](1, 5*time.Millisecond)
+	m := NewMemo[int, int](1, time.Hour)
 	var loads int
 	get := func(k int) {
 		t.Helper()
@@ -102,7 +102,14 @@ func TestMemoCapacityAndTTL(t *testing.T) {
 	if loads != 3 {
 		t.Fatal(loads)
 	}
-	time.Sleep(10 * time.Millisecond)
+	// Expire the retained entry explicitly: a 5 ms TTL made the preceding
+	// capacity assertions depend on scheduler speed under the race detector.
+	m.mu.Lock()
+	entry := m.items[1]
+	item := entry.Value.(cacheItem[int, int])
+	item.expires = time.Now().Add(-time.Second)
+	entry.Value = item
+	m.mu.Unlock()
 	get(1)
 	if loads != 4 {
 		t.Fatal(loads)

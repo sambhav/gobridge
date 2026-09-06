@@ -51,9 +51,11 @@ func (r *Registry) Serve(parent context.Context, in io.Reader, out io.Writer, ma
 	var mu, writeMu sync.Mutex
 	active := map[string]context.CancelFunc{}
 	write := func(resp Response) {
-		data, err := json.Marshal(resp)
+		// MarshalJSON already produces validated JSON. Calling json.Marshal on
+		// Response would scan and copy that entire encoded payload a second time.
+		data, err := resp.MarshalJSON()
 		if err != nil || len(data) > MaxFrame {
-			data, _ = json.Marshal(Response{ID: resp.ID, Error: &Error{"resource_exhausted", "response cannot be encoded within frame limit"}})
+			data, _ = (Response{ID: resp.ID, Error: &Error{"resource_exhausted", "response cannot be encoded within frame limit"}}).MarshalJSON()
 		}
 		writeMu.Lock()
 		defer writeMu.Unlock()
@@ -106,10 +108,12 @@ func (r *Registry) Serve(parent context.Context, in io.Reader, out io.Writer, ma
 			write(Response{ID: req.ID, Error: &Error{"invalid_argument", "timeout must be 0..86400000 ms"}})
 			continue
 		}
-		callCtx, callCancel := context.WithCancel(ctx)
+		var callCtx context.Context
+		var callCancel context.CancelFunc
 		if req.TimeoutMS > 0 {
-			callCancel()
 			callCtx, callCancel = context.WithTimeout(ctx, time.Duration(req.TimeoutMS)*time.Millisecond)
+		} else {
+			callCtx, callCancel = context.WithCancel(ctx)
 		}
 		active[req.ID] = callCancel
 		mu.Unlock()
@@ -118,7 +122,7 @@ func (r *Registry) Serve(parent context.Context, in io.Reader, out io.Writer, ma
 			var result any
 			var err error
 			if req.Method == "$hello" {
-				result = r.Schema()
+				result, err = r.hello(req.Params)
 			} else if req.Method == "$init" {
 				err = r.Initialize(c, req.Params)
 			} else {
@@ -138,4 +142,30 @@ func (r *Registry) Serve(parent context.Context, in io.Reader, out io.Writer, ma
 		}(req, callCtx, callCancel)
 	}
 	return scan.Err()
+}
+
+// Compact hello is opt-in: older clients still receive the complete schema,
+// and newer clients can accept full hello responses from older daemons.
+func (r *Registry) hello(raw json.RawMessage) (any, error) {
+	var options struct {
+		Compact bool `json:"compact"`
+	}
+	if len(raw) != 0 {
+		if err := json.Unmarshal(raw, &options); err != nil {
+			return nil, Failure("invalid_argument", "invalid hello options")
+		}
+	}
+	schema := r.Schema()
+	if !options.Compact {
+		return schema, nil
+	}
+	var constructor *struct{}
+	if schema.Constructor != nil {
+		constructor = &struct{}{}
+	}
+	return struct {
+		Protocol    int       `json:"protocol"`
+		Hash        string    `json:"schema_hash"`
+		Constructor *struct{} `json:"constructor,omitempty"`
+	}{schema.Protocol, schema.Hash, constructor}, nil
 }

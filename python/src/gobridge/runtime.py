@@ -186,6 +186,8 @@ class _Transport:
         self.seq = 0
         self.max_pending = max_pending
         self.failure = None
+        self._direct_writes = False
+        self._queued_writes = 0
         self.outbox = queue.Queue(maxsize=max_pending * 2 + 4)
         self.proc = self.reader = self.writer = None
         deadline = time.monotonic() + startup_timeout
@@ -197,12 +199,15 @@ class _Transport:
                     [*command, "serve"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=None, bufsize=0, close_fds=True,
                 )
+                if os.name == "posix":
+                    os.set_blocking(self.proc.stdin.fileno(), False)
+                    self._direct_writes = True
                 self.reader = threading.Thread(target=self._read, daemon=True, name="gobridge-reader")
                 self.writer = threading.Thread(target=self._write, daemon=True, name="gobridge-writer")
                 _transports.add(self)
                 self.reader.start()
                 self.writer.start()
-            hello = self._startup_call("$hello", {}, deadline)
+            hello = self._startup_call("$hello", {"compact": True}, deadline)
             if not isinstance(hello, dict) or hello.get("protocol") != 1:
                 raise DaemonError("protocol", "unsupported daemon protocol version")
             if expected_schema is not None and hello.get("schema_hash") != expected_schema:
@@ -245,11 +250,27 @@ class _Transport:
             f = futures.Future()
             self.pending[request_id] = f
             try:
-                self.outbox.put_nowait(data)
+                self._enqueue(data)
             except queue.Full:
                 del self.pending[request_id]
                 raise BusyError("busy", "client outbound queue is full") from None
             return request_id, f
+
+    def _enqueue(self, data):
+        # Caller holds self.lock. Never overtake a queued or partially written
+        # frame. Small Unix writes normally complete without a writer wakeup.
+        if self._direct_writes and self._queued_writes == 0 and len(data) <= 4096:
+            try:
+                written = os.write(self.proc.stdin.fileno(), data)
+            except OSError:
+                # The writer handles EAGAIN and sticky transport failures using
+                # the normal asynchronous failure path for pending futures.
+                written = 0
+            if written == len(data):
+                return
+            data = data[written:]
+        self.outbox.put_nowait(data)
+        self._queued_writes += 1
 
     def cancel(self, request_id):
         with self.lock:
@@ -257,9 +278,15 @@ class _Transport:
             if self.failure or f is None:
                 return
         f.cancel()
-        try:
-            self.outbox.put_nowait(json.dumps({"method": "$cancel", "params": {"id": request_id}}).encode() + b"\n")
-        except queue.Full:
+        full = False
+        with self.lock:
+            if self.failure:
+                return
+            try:
+                self._enqueue(json.dumps({"method": "$cancel", "params": {"id": request_id}}).encode() + b"\n")
+            except queue.Full:
+                full = True
+        if full:
             # Without room to deliver cancellation, fail the transport rather
             # than silently leaving an operation running without an owner.
             self.close()
@@ -285,11 +312,25 @@ class _Transport:
                 if data is None or self.failure:
                     return
                 view = memoryview(data)
-                while view:
-                    n = self.proc.stdin.write(view)
-                    if not n:
-                        raise BrokenPipeError("daemon stopped reading")
-                    view = view[n:]
+                # A queued frame keeps _queued_writes > 0, excluding direct
+                # caller writes. Let the dedicated writer block normally for
+                # large frames instead of adding readiness waits per pipe chunk.
+                if self._direct_writes:
+                    os.set_blocking(self.proc.stdin.fileno(), True)
+                try:
+                    while view:
+                        if self.failure:
+                            return
+                        n = self.proc.stdin.write(view)
+                        if not n:
+                            raise BrokenPipeError("daemon stopped reading")
+                        view = view[n:]
+                finally:
+                    if self._direct_writes:
+                        os.set_blocking(self.proc.stdin.fileno(), False)
+                # Restore nonblocking mode before allowing a caller fast path.
+                with self.lock:
+                    self._queued_writes -= 1
         except (OSError, ValueError) as e:
             self._fail(DaemonError("transport", str(e)))
 
