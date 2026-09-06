@@ -27,12 +27,11 @@ def main():
         with (project / "go.mod").open("a") as file:
             file.write('\nreplace github.com/sambhav/gobridge => ' + json.dumps(ROOT.as_posix()) + '\n')
         target = subprocess.check_output(["go", "env", "GOOS"], text=True).strip() + "-" + subprocess.check_output(["go", "env", "GOARCH"], text=True).strip()
-        # Inspection does not generate adapters or dist even in a fresh scaffold.
+        # Init includes its adapter; inspection never creates distribution outputs.
         plan = json.loads(run(cli, "build", "--check", "--targets", target).stdout)
         assert plan["modules"][0]["python"]["module"] == "acme.tools.greeter"
-        assert not (project / "bridge/zz_gobridge.gen.go").exists()
+        assert (project / "bridge/zz_gobridge.gen.go").exists()
         assert not (project / "dist").exists()
-        run(cli, "generate", "--dir", "bridge")
         run("go", "mod", "tidy")
         run(cli, "dev", "--once")
         assert "Hello, World!" in run(sys.executable, "app.py", env=dict(os.environ, PYTHONPATH=str(project / "build"))).stdout
@@ -41,18 +40,31 @@ def main():
         package = project / "node_modules/@acme/greeter"
         previous = (package / "package.json").read_bytes()
         source = project / "bridge/greeter.go"
-        original = source.read_text()
+        original = source.read_text() + """
+
+type Service struct { value int }
+//gobridge:constructor
+func NewService() *Service { return &Service{value: 42} }
+//gobridge:export
+func (s *Service) Value() int { return s.value }
+"""
         source.write_text("invalid go source")
         run(cli, "dev", "--typescript", "--once", success=False)
         assert (package / "package.json").read_bytes() == previous
         assert "Hello, World!" in run("node", "app.mts").stdout
         source.write_text(original)
-        config = json.loads((project / "gobridge.json").read_text())
-        config["modules"][0]["python"]["package"] = "python-package"
-        config["modules"][0]["typescript"]["package"] = "typescript-package"
-        config["python"]["requires"] = ["typing-extensions>=4"]
-        config["typescript"]["dependencies"] = {"escape-string-regexp": "5.0.0"}
-        (project / "gobridge.json").write_text(json.dumps(config))
+        run(cli, "dev", "--once")
+        assert "42" in run(sys.executable, "-c", 'from acme.tools.greeter import value_sync; print(value_sync())', env=dict(os.environ, PYTHONPATH=str(project / "build"))).stdout
+        run(cli, "dev", "--typescript", "--once")
+        assert "42" in run("node", "--input-type=module", "-e", 'import {value} from "@acme/greeter"; console.log(await value());').stdout
+        assert not (project / "gobridge.json").exists()
+        source.write_text(original.replace("package bridge", "\n".join([
+            '//gobridge:python-package ./python-package',
+            '//gobridge:ts-package ./typescript-package',
+            '//gobridge:python-requires ["typing-extensions>=4"]',
+            '//gobridge:npm-dependencies {"escape-string-regexp":"5.0.0"}',
+            'package bridge',
+        ])))
         py = project / "python-package"
         ts = project / "typescript-package"
         py.mkdir(); ts.mkdir()

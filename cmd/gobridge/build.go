@@ -63,10 +63,7 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 	if *check {
 		return json.NewEncoder(os.Stdout).Encode(plan)
 	}
-	modules, err := p.resolveModules()
-	if err != nil {
-		return err
-	}
+	modules := plan.Modules
 	generated := map[string]bool{}
 	for _, module := range modules {
 		if module.Source != "" && !generated[absolute(module.Source)] {
@@ -124,7 +121,8 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		return err
 	}
 	artifacts := filepath.Join(stage, "artifacts")
-	common := []string{"--modules", moduleFile, "--project", root, "--go-package", p.Command, "--class", p.Class, "--binary", p.binaryName(), "--version", p.Version, "--repository", p.Repository, "--license", p.License, "--build-cache", filepath.Join(stage, "go-build")}
+	settings, _ := json.Marshal(p.manifest())
+	common := []string{"--settings", string(settings), "--modules", moduleFile, "--project", root, "--go-package", p.Command, "--class", p.Class, "--binary", p.binaryName(), "--version", p.Version, "--repository", p.Repository, "--license", p.License, "--build-cache", filepath.Join(stage, "go-build")}
 	targetArgs := []string{}
 	if *targets != "all" {
 		targetArgs = append(targetArgs, "--targets")

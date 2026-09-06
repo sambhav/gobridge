@@ -24,7 +24,7 @@ def main():
         project.mkdir()
         guide = (ROOT / "README.md").read_text()
         go_blocks = re.findall(r"```go\n(.*?)```", guide, re.S)
-        library_source = next(b for b in go_blocks if b.startswith("package bridge\n"))
+        library_source = next(b for b in go_blocks if "package bridge\n" in b)
         command_source = next(b for b in go_blocks if b.startswith("package main\n"))
         options_source = next(b for b in go_blocks if b.startswith("type Config struct"))
         (project / "go.mod").write_text(

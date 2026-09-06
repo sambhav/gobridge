@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"sort"
@@ -45,7 +46,7 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 	options := devOptions{project: p}
 	flags := flag.NewFlagSet("dev", flag.ContinueOnError)
 	flags.SetOutput(log)
-	moduleName := flags.String("module", "", "module name from gobridge.json")
+	moduleName := flags.String("module", "", "module name declared in Go comments or gobridge.json")
 	flags.StringVar(&options.output, "python", "", "generated Python package directory (default build/<package/path>)")
 	flags.BoolVar(&options.typescript, "typescript", false, "generate a local npm package and restart a Node application")
 	flags.DurationVar(&options.interval, "interval", 500*time.Millisecond, "source polling interval")
@@ -194,6 +195,16 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 			continue
 		}
 		if nextGo != goHash {
+			current, err := loadProject()
+			if err != nil {
+				fmt.Fprintln(log, "Build failed; keeping the last working package:", err)
+				continue
+			}
+			if !reflect.DeepEqual(current, p) {
+				configurationChanged = true
+				fmt.Fprintln(log, "Go package settings changed; restart gobridge dev to apply configuration. Keeping the last working application.")
+				continue
+			}
 			goHash, pyHash = nextGo, nextPy
 			if rebuild() {
 				restart()

@@ -37,15 +37,13 @@ func planBuild(ctx context.Context, p project, targets, output string, python, t
 		return plan, err
 	}
 	plan.Modules = modules
-	if len(p.Modules) > 0 {
-		for _, module := range modules {
-			if _, err := planBuild(ctx, module.project(p), targets, output, python, typescript); err != nil {
-				return plan, fmt.Errorf("module %s: %w", module.Name, err)
-			}
+	for _, module := range modules {
+		if err := validateCustomization(module.project(p), python, typescript); err != nil {
+			return plan, fmt.Errorf("module %s: %w", module.Name, err)
 		}
-	}
-	if err := validateCustomization(p, python, typescript); err != nil {
-		return plan, err
+		if err := validateBuildModule(ctx, module); err != nil {
+			return plan, fmt.Errorf("module %s: %w", module.Name, err)
+		}
 	}
 	if strings.TrimSpace(output) == "" {
 		return plan, fmt.Errorf("output must not be empty")
@@ -53,7 +51,7 @@ func planBuild(ctx context.Context, p project, targets, output string, python, t
 	if python && (!regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$`).MatchString(p.PythonDistribution) || regexp.MustCompile(`[-_.]+`).ReplaceAllString(strings.ToLower(p.PythonDistribution), "-") == "gobridge-runtime") {
 		return plan, fmt.Errorf("invalid Python distribution %q", p.PythonDistribution)
 	}
-	if typescript && (len(p.NPMPackage) > 214 || !regexp.MustCompile(`^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`).MatchString(p.NPMPackage) || p.NPMPackage == "gobridge-runtime") {
+	if typescript && !validNPMName(p.NPMPackage) {
 		return plan, fmt.Errorf("invalid npm package %q", p.NPMPackage)
 	}
 	for _, value := range []string{p.Repository, p.License} {
@@ -106,11 +104,6 @@ func planBuild(ctx context.Context, p project, targets, output string, python, t
 			break
 		}
 	}
-	if p.Source != "" {
-		if info, err := os.Stat(p.Source); err != nil || !info.IsDir() {
-			return plan, fmt.Errorf("source directory does not exist: %s", p.Source)
-		}
-	}
 	checks := []struct {
 		name string
 		args []string
@@ -152,29 +145,36 @@ func planBuild(ctx context.Context, p project, targets, output string, python, t
 		}
 		plan.Tools[check.name] = strings.TrimSpace(string(data))
 	}
-	if len(p.Modules) > 0 {
-		return plan, nil
-	}
-	if p.Command == "." || strings.HasPrefix(p.Command, "./") || filepath.IsAbs(p.Command) {
-		pkg, err := build.Default.ImportDir(p.Command, 0)
-		if err != nil || pkg.Name != "main" {
-			return plan, fmt.Errorf("command %q must resolve to a Go main package: %v", p.Command, err)
+	return plan, nil
+}
+
+// Check module-local inputs once; distribution and tool checks belong to the build.
+func validateBuildModule(ctx context.Context, m resolvedModule) error {
+	if m.Source != "" {
+		if info, err := os.Stat(m.Source); err != nil || !info.IsDir() {
+			return fmt.Errorf("source directory does not exist: %s", m.Source)
 		}
-		return plan, nil
 	}
-	cmd := exec.CommandContext(ctx, "go", "list", "-mod=readonly", "-e", "-json", p.Command)
+	if m.Command == "." || strings.HasPrefix(m.Command, "./") || filepath.IsAbs(m.Command) {
+		pkg, err := build.Default.ImportDir(m.Command, 0)
+		if err != nil || pkg.Name != "main" {
+			return fmt.Errorf("command %q must resolve to a Go main package: %v", m.Command, err)
+		}
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "go", "list", "-mod=readonly", "-e", "-json", m.Command)
 	data, err := cmd.Output()
 	if err != nil {
-		return plan, fmt.Errorf("inspect Go command %q: %w", p.Command, err)
+		return fmt.Errorf("inspect Go command %q: %w", m.Command, err)
 	}
 	var pkg struct {
 		Name string
 		Dir  string
 	}
 	if json.Unmarshal(data, &pkg) != nil || pkg.Name != "main" || pkg.Dir == "" {
-		return plan, fmt.Errorf("command %q must resolve to a Go main package", p.Command)
+		return fmt.Errorf("command %q must resolve to a Go main package", m.Command)
 	}
-	return plan, nil
+	return nil
 }
 
 func validNPMName(name string) bool {

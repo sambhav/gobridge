@@ -5,7 +5,9 @@ import re
 import shutil
 
 
-def settings(project):
+def settings(project, resolved=None):
+    if resolved is not None:
+        return resolved
     path = Path(project) / "gobridge.json"
     return json.loads(path.read_text()) if path.is_file() else {}
 
@@ -37,8 +39,8 @@ def copy_package(project, source, destination):
     return True
 
 
-def python_requirements(project):
-    values = settings(project).get("python", {}).get("requires", [])
+def python_requirements(project, resolved=None):
+    values = settings(project, resolved).get("python", {}).get("requires", [])
     for value in values:
         if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9_,.-]+\])?(?:\s*(?:~=|==|!=|<=|>=|<|>)\s*[A-Za-z0-9.*+!-]+(?:\s*,\s*(?:~=|==|!=|<=|>=|<|>)\s*[A-Za-z0-9.*+!-]+)*)?", value):
             raise ValueError("python.requires supports package names, extras, and version comparisons")

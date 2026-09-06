@@ -38,7 +38,7 @@ def run(*args, **kwargs):
     subprocess.run(args, check=True, cwd=PROJECT, **kwargs)
 
 
-def write_wheel(stage, package, distribution, version, tag, output, repository, license_id, project):
+def write_wheel(stage, package, distribution, version, tag, output, repository, license_id, project, settings=None):
     """Write a standard wheel using only Python's standard library."""
     version = application_version(version)
     for value in (repository, license_id):
@@ -52,7 +52,7 @@ def write_wheel(stage, package, distribution, version, tag, output, repository, 
     headers = ["Metadata-Version: 2.1", f"Name: {distribution}", f"Version: {version}",
                f"Summary: Typed Python bindings for {package}", "Requires-Python: >=3.10",
                "Description-Content-Type: text/markdown"]
-    headers.extend("Requires-Dist: " + requirement for requirement in python_requirements(project))
+    headers.extend("Requires-Dist: " + requirement for requirement in python_requirements(project, settings))
     if repository: headers.append(f"Home-page: {repository}")
     if license_id: headers.append(f"License: {license_id}")
     (dist_info / "METADATA").write_text("\n".join(headers) + "\n\n" + description + "\n", encoding="utf-8")
@@ -96,6 +96,7 @@ def write_wheel(stage, package, distribution, version, tag, output, repository, 
 def main():
     global PROJECT
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--settings", type=json.loads, help="resolved distribution settings from gobridge")
     parser.add_argument("--modules", type=Path, help="resolved module manifest from gobridge build")
     parser.add_argument("--targets", nargs="+", choices=TARGETS, default=list(TARGETS))
     parser.add_argument("--build-cache", type=Path, help="reuse Go link outputs; Go still checks sources and flags")
@@ -172,7 +173,7 @@ def main():
                 if goos == "linux":
                     validate_static_linux(binary, goarch)
             write_wheel(stage, args.package, args.distribution, version, tag, output,
-                        args.repository, args.license, PROJECT)
+                        args.repository, args.license, PROJECT, args.settings)
             print("Built", target, flush=True)
 
 

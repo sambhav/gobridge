@@ -13,7 +13,8 @@ python tools/check_typescript.py
 ```
 
 The first check runs Go race tests/vet, adapter drift checks, Cobra tests
-and pytest with real daemons. Pytest builds the Go fixtures and generates current
+and pytest with real daemons. Scaffolding declares module and packaging settings in Go package comments; the
+workflow check exercises discovery without a manifest. Pytest builds the Go fixtures and generates current
 Python bindings before test collection, so `python -m pytest` also works directly. Generated bindings live in
 ignored output directories. `examples/greeter` is the public library example;
 `internal/fixtures` holds programs for protocol, type, and lifecycle tests.
