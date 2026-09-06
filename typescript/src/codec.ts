@@ -63,6 +63,10 @@ function transform(type: WireType, value: unknown, input: boolean, path: string)
     return transform(type.elem!, value, input, path);
   }
   if ((type.kind === "slice" || type.kind === "map") && value === null) return null;
+  if(type.enum?.length){
+    const scalar={kind:type.kind};const result=transform(scalar,value,input,path);
+    if(!type.enum.some(entry=>transform(scalar,entry.value,false,path)===result))return fail("unknown enum value");return result;
+  }
   switch (type.kind) {
     case "bytes":
       if (value === null) return null;
@@ -81,14 +85,19 @@ function transform(type: WireType, value: unknown, input: boolean, path: string)
     case "bool":
       return typeof value === "boolean" ? value : fail("expected a boolean");
     case "duration":
+    case "uint64":
     case "int64": {
       // Go emits int64 as decimal integer tokens. Safe parsed numbers can be
       // converted exactly; unsafe tokens were already preserved by parseWire.
       const result = !input && typeof value === "number" && Number.isSafeInteger(value) ? BigInt(value) : value;
       if (typeof result !== "bigint") return fail("expected bigint for int64 (use a literal such as 123n)");
-      if (result < int64Min || result > int64Max) return fail("outside signed int64 range");
+      if (result < (type.kind === "uint64" ? 0n : int64Min) || result > (type.kind === "uint64" ? (1n << 64n)-1n : int64Max)) return fail("outside signed int64 range");
       return result;
     }
+    case "uint":
+    case "uint8":
+    case "uint16":
+    case "uint32":
     case "int":
     case "int8":
     case "int16":
@@ -96,7 +105,9 @@ function transform(type: WireType, value: unknown, input: boolean, path: string)
       if (typeof value !== "number" || !Number.isSafeInteger(value)) {
         return fail("expected a safe integer; expose Go int64 for the full 64-bit range");
       }
-      if (type.kind !== "int") {
+      if (type.kind.startsWith("uint")) {
+        if(value < 0 || (type.kind !== "uint" && value >= 2**Number(type.kind.slice(4)))) return fail(`outside ${type.kind} range`);
+      } else if (type.kind !== "int") {
         const bits = Number(type.kind.slice(3));
         if (value < -(2 ** (bits - 1)) || value >= 2 ** (bits - 1)) return fail(`outside ${type.kind} range`);
       }
@@ -109,6 +120,9 @@ function transform(type: WireType, value: unknown, input: boolean, path: string)
       const result = !input && typeof value === "bigint" ? Number(value) : value;
       return typeof result === "number" && Number.isFinite(result) ? result : fail("expected a finite number");
     }
+    case "array":
+      if (!Array.isArray(value) || value.length !== (type.length ?? 0)) return fail(`expected exactly ${type.length ?? 0} items`);
+      return value.map((item,i)=>transform(type.elem!,item,input,`${path}[${i}]`));
     case "slice":
       if (!Array.isArray(value)) return fail("expected an array or null");
       return value.map((item, i) => transform(type.elem!, item, input, `${path}[${i}]`));
@@ -127,9 +141,10 @@ function transform(type: WireType, value: unknown, input: boolean, path: string)
         const name = input ? (field.public_name ?? camelCase(field.name)) : field.name;
         const outputName = input ? field.name : (field.public_name ?? camelCase(field.name));
         if (!Object.hasOwn(value, name) || (input && value[name] === undefined)) {
-          if (field.type.kind === "ptr") continue;
+          if (!field.required && (field.optional || field.type.kind === "ptr")) continue;
           return fail(`missing field ${name}`);
         }
+        if(field.non_null && value[name]===null) return fail(`null is not allowed for ${name}`);
         entries.push([outputName, transform(field.type, value[name], input, `${path}.${name}`)]);
       }
       return Object.fromEntries(entries);
@@ -163,10 +178,12 @@ export function compileCodec<T = unknown>(type: WireType): {
       const child = compile(type.elem!, input);
       return (value, path) => value === null ? null : child(value, path);
     }
-    if (type.kind === "slice") {
+    if (type.kind === "slice" || type.kind === "array") {
+      const isArray = type.kind === "array", length = type.length ?? 0;
       const child = compile(type.elem!, input);
       return (value, path) => {
-        if (value === null) return null;
+        if (value === null && !isArray) return null;
+        if (isArray && (!Array.isArray(value) || value.length !== length)) return fail(path, `expected exactly ${length} items`);
         if (!Array.isArray(value)) return fail(path, "expected an array or null");
         return value.map((item, i) => child(item, `${path}[${i}]`));
       };
@@ -184,7 +201,8 @@ export function compileCodec<T = unknown>(type: WireType): {
       const fields = (type.fields ?? []).map(field => ({
         name: input ? (field.public_name ?? camelCase(field.name)) : field.name,
         output: input ? field.name : (field.public_name ?? camelCase(field.name)),
-        optional: field.type.kind === "ptr",
+        optional: !field.required && (field.optional || field.type.kind === "ptr"),
+        nonNull:field.non_null,
         convert: compile(field.type, input),
       }));
       const allowed = new Set(fields.map(field => field.name));
@@ -197,6 +215,7 @@ export function compileCodec<T = unknown>(type: WireType): {
             if (field.optional) continue;
             return fail(path, `missing field ${field.name}`);
           }
+          if(field.nonNull && value[field.name]===null)return fail(path,`null is not allowed for ${field.name}`);
           const converted = field.convert(value[field.name], `${path}.${field.name}`);
           if (field.output === "__proto__") {
             Object.defineProperty(output, field.output, {value: converted, enumerable: true, writable: true, configurable: true});
@@ -208,6 +227,10 @@ export function compileCodec<T = unknown>(type: WireType): {
       };
     }
     const scalar = {kind: type.kind};
+    if (type.enum?.length) {
+      const allowed = type.enum.map(entry=>transform(scalar,entry.value,false,"enum"));
+      return (value,path)=>{const result=transform(scalar,value,input,path); if(!allowed.includes(result as never)) return fail(path,"unknown enum value");return result;};
+    }
     return (value, path) => transform(scalar, value, input, path);
   };
   const encoder = compile(type, true), decoder = compile(type, false);

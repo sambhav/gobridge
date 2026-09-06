@@ -5,14 +5,15 @@ Generated packages bundle the Go executable and a private runtime. Calls reuse
 one local subprocess per client, keeping objects and caches alive between calls.
 
 This README is the complete user guide. [Contributing](CONTRIBUTING.md) covers
-maintainer workflows and internals; [benchmarks](docs/performance.md) record
-performance measurements and their reproduction commands.
+maintainer workflows, protocol internals, benchmarking and releases.
 
 [Quick start](#quick-start) · [Configuration](#configuration) ·
 [Names](#names-in-go-source) · [Constructors](#constructors-and-functional-options) ·
 [Build and publish](#build-and-publish) · [Development](#development) ·
 [State and sessions](#share-state-deliberately) · [Types](#types-validation-and-runtime-settings) ·
-[Manual registration](#manual-registration) · [Migration](#breaking-api-changes)
+[Streaming and batches](#streaming-and-batches) · [Errors and logging](#errors-and-observability) ·
+[Embedding](#embedded-generation-and-packaging) · [API checks](#api-snapshots-for-ci) ·
+[Manual registration](#manual-registration)
 
 ## Quick start
 
@@ -137,6 +138,7 @@ can be built from its directory with `go run ../../cmd/gobridge build --python -
 | `modules[].name` | Required unique identifier used by `dev --module`. |
 | `modules[].source` | Directory scanned for annotations; omit for manual registration. |
 | `modules[].command` | Required Go main package. |
+| `modules[].command_prefix` | Argument array locating bridge commands inside an existing binary, e.g. `["bridge"]`. |
 | `modules[].python.module` | Python import path; defaults to module name. |
 | `modules[].typescript.export` | npm export path, `.` or `./subpath`; defaults to module name with dots changed to slashes and prefixed by `./`. |
 | `modules[].python.class`, `modules[].typescript.class` | Explicit generated class names; otherwise source annotations or a name derived from the Python import path. |
@@ -592,25 +594,179 @@ the shipped host only needs the daemon command. The complete
 It is a separate Go module so the core library has no Cobra dependency.
 
 
+## Embedded generation and packaging
+
+For an existing binary, mount `registry.Run` underneath a private subcommand and
+forward its remaining arguments and streams. For example, a Cobra command can use:
+
+```go
+bridgeCommand := &cobra.Command{
+    Use: "bridge", Hidden: true, DisableFlagParsing: true,
+    RunE: func(cmd *cobra.Command, args []string) error {
+        return registry.Run(cmd.Context(), args,
+            cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
+    },
+}
+root.AddCommand(bridgeCommand)
+```
+
+Set the module's `"command_prefix": ["bridge"]` in `gobridge.json`. Build and dev
+invoke `host bridge generate-python` or `host bridge generate-typescript`; generated
+clients launch `host bridge serve` automatically. Prefixes are argv arrays, never
+shell strings. Each module may select a different subcommand in the same host.
+Generation builds the host but never initializes the registered receiver.
+Avoid running application startup side effects before routing tooling commands.
+
+When generating directly in Go, pass `WithCommandPrefix("bridge")` to
+`GeneratePython` or `GenerateTypeScript`. Explicit runtime `command` overrides
+still supply the complete executable/prefix; the runtime appends `serve`.
+Hosts that expose only `Serve` can keep doing so, but packaging needs generation
+commands too. The preceding Cobra example demonstrates the narrower serving-only
+mount; this mount exposes the registry's tooling and operation commands privately.
+
+## Streaming and batches
+
+A producer takes a leading context and a final `yield func(T) error` parameter,
+then returns `error`. `Bind` recognizes this shape and source generation omits
+`yield` from public inputs. Receiver methods work with `NewObject` too.
+
+```go
+//gobridge:export
+func Count(ctx context.Context, n int, yield func(int64) error) error {
+    for i := 0; i < n; i++ {
+        if err := yield(int64(i)); err != nil { return err }
+    }
+    return nil
+}
+```
+
+`RegisterStream[I, T](registry, name, description, producer)` provides the typed
+registration path with a named input struct. Generated Python returns a typed
+async iterator (or synchronous iterator from `SyncService`/`count_sync`), and
+TypeScript returns `AsyncGenerator<T>`:
+
+```python
+from contextlib import aclosing
+
+async with aclosing(client.count(n=100)) as items:
+    async for item in items:
+        print(item)
+        if item == 5:
+            break
+```
+
+```typescript
+for await (const item of client.count({n: 100})) {
+  console.log(item);
+  if (item === 5n) break;
+}
+```
+
+Use `contextlib.closing` for early exits from synchronous Python iterators.
+Full exhaustion, explicit iterator closure, and session shutdown release the
+producer. TypeScript `for await` closes on `break`; Python needs the closing scope.
+Producers must honor context cancellation and stop on yield errors, including
+while doing work between yields.
+
+Streams use pull requests on the existing multiplexed transport: one item per
+read, no growing item queue. Open streams are limited to the server's concurrency
+limit; idle streams expire after 30 seconds. A single read is also limited to 30
+seconds by that lease, even if its call timeout is longer. A canceled read closes
+its stream. Each item retains the 1 MiB frame limit. This first implementation is
+server-to-client streaming; it does not expose arbitrary channels, client streams,
+or bidirectional streams. Errors can arrive after earlier items were delivered.
+
+For a typed batch, construct descriptors through `client.calls` (also exported as
+module-level `calls`). This uses the generated public names and model types:
+
+```python
+first = client.calls.lookup(id="first")
+second = client.calls.lookup(id="second")
+results = await client.abatch([first, second])
+first_model = results.get(first)  # typed return value; raises this call's error
+```
+
+```typescript
+const [first, second] = await client.batch([
+  client.calls.lookup({id: "first"}),
+  client.calls.lookup({id: "second"}),
+]);
+if (!first.error) console.log(first.result); // inferred generated model type
+```
+
+Descriptors snapshot their arguments immediately and do not start a subprocess.
+Python's `BatchResults.get(descriptor)` preserves its result type; indexed entries
+also expose `result` or a `BridgeError`. Create a separate descriptor for each
+entry in a Python batch. Use `client.batch` in synchronous Python and `abatch` in
+async Python; TypeScript `batch` returns a Promise. Streams have no batch descriptor.
+
+Raw `{method, params}` dictionaries/objects remain available for dynamic callers;
+these use stable wire names and return wire values. The Go equivalent is
+`registry.Batch(ctx, calls)`. At most 128 unary calls execute in input order, in one
+round trip. Individual errors allow subsequent calls to run. Cancellation prevents
+remaining handlers from starting; response-budget overflow marks remaining calls
+as unexecuted. Batches are not atomic and never roll back or replay effects.
+
+## Errors and observability
+
+Return `gobridge.Failure(code, message)` for intentional public errors. Use
+`&gobridge.Error{Code: "invalid_argument", Message: "Unknown region",
+Details: map[string]string{"field": "region"}}` when clients need structured
+context. Wrapped bridge errors retain their code and details. Python and TypeScript
+exceptions expose `.code`, `.message`, and `.details`; existing standard error
+subclasses continue to work.
+
+Ordinary Go errors become `internal: internal operation error` at the transport
+boundary. Their original messages are available only to the host observer. Panic
+responses are similarly generic. This is an intentional behavior change: explicitly
+mark user-facing messages, including constructor/factory validation failures.
+
+```go
+registry, err := greeter.NewGobridge(
+    gobridge.WithLogger(slog.New(slog.NewJSONHandler(os.Stderr, nil))),
+    gobridge.WithObserver(func(ctx context.Context, event gobridge.CallEvent) {
+        // Update your metrics/traces here; event.Err is the original Go error.
+    }),
+)
+```
+
+Completion events include method, request ID, duration and status code. Unary
+calls, constructor initialization and stream producer completion are observed.
+`gobridge.RequestID(ctx)` lets handlers correlate their own logs. Stream duration
+covers the producer lifetime; batch members share the enclosing request ID.
+Observer callbacks must be concurrency-safe and nonblocking; panics are isolated.
+No telemetry SDK dependency is required. Admission failures and malformed protocol
+frames are not operation-completion events.
+
+The logger emits successes at debug and failures at warning. It excludes arguments,
+results, constructor data and raw errors. Enable debug on the handler when needed.
+Keep logs on stderr: stdout is reserved for protocol frames. Client subprocesses
+inherit stderr, so logs reach the parent application's normal logging destination.
+
 ## Types, validation, and runtime settings
 
-Supported values are strings, booleans, signed integers, finite floats, named
-structs, slices, string-keyed maps and pointers. Struct fields need explicit
-`json` names. Pointer inputs are optional/nullable; slices/maps are required but
-can be null. Bytes, timestamps, and durations have the explicit codecs described
-below. TypeScript omits absent `omitempty` pointer properties. Other custom
-marshalers, recursive types, interfaces, variadic functions and multiple non-error
-results need adapters.
+Supported values are strings, booleans, signed/unsigned integers, finite floats,
+named structs, fixed arrays, slices, string-keyed maps and pointers. Struct fields need explicit
+`json` names. By default, pointer inputs are optional/nullable; slices/maps are required but
+can be null. The `required` and `nullable` tags below override these defaults. Bytes, timestamps, and durations have the explicit codecs described
+below. TypeScript omits absent optional properties. Recursive types, embedded
+struct fields, arbitrary interfaces, variadic functions and multiple non-error
+results still need explicit wrappers. Custom marshalers can opt in using
+`GobridgeWireType`, described below.
 
 | Go type | Python | TypeScript |
 | --- | --- | --- |
 | `int8` / `int16` / `int32` | `int` within Go range | `number` within Go range |
 | `int` | `int` within target Go range | Safe integer `number` |
-| `int64` | Exact `int` | Exact `bigint`, even for small values |
+| `int64` / `uint64` | Exact `int` | Exact `bigint`, even for small values |
+| `uint8` / `uint16` / `uint32` | Nonnegative `int` within Go range | Nonnegative `number` within Go range |
+| `uint` | Nonnegative `int` within target Go range | Nonnegative safe-integer `number` |
+| `[N]T` | Non-null `list[T]`, exactly N items | Non-null `ReadonlyArray<T>`, runtime length checked |
 | `float32` / `float64` | Finite `float` | Finite `number` |
 | Named struct | Frozen dataclass | Readonly interface |
 
-Use Go `int64` when Node needs the full range. Unsafe Numbers fail explicitly.
+Use Go `int64` or `uint64` when Node needs the full range. `uintptr` remains
+unsupported. Fixed byte arrays are numeric arrays; `[]byte` keeps its base64 codec. Unsafe Numbers fail explicitly.
 Bigints cross the existing JSON protocol as exact numeric literals; application
 `JSON.stringify` still needs its own bigint-aware serializer.
 
@@ -624,7 +780,7 @@ type Request struct {
 ```
 
 Bounds are inclusive; string lengths count Unicode code points. Length rules also
-apply to slices/maps. Constraints validate non-null values without changing
+apply to arrays, slices and maps. Constraints validate non-null values without changing
 nullability. Invalid tags fail registration. Go validates inputs for every
 transport; Python metadata and TypeScript JSDoc expose the same rules. Defaults
 belong in the Go constructor. Native callers retain the library's own validation.
@@ -644,11 +800,106 @@ Protect mutable Go receivers as you would for goroutines. The optional `Memo`
 cache supplies bounded TTL/LRU storage and coalesces loads per key. One waiter's
 cancellation leaves other waiters running; the last cancellation stops the loader
 context. Errors are not cached. Keep cached reference-containing values immutable
-or copy them. Reuse clients and batch useful work to amortize IPC.
+or copy them. `memo.Delete(key)` and `memo.Clear()` invalidate cached results.
+Invalidation detaches in-flight loaders: current waiters may finish, but their
+results cannot repopulate invalidated entries. Cache keys must include all inputs
+and identity boundaries; caches live in the Go process and are not shared across
+client processes. Reuse clients and batch useful work to amortize IPC.
 
-For test commands, protocol details, measurements and release work, see
+For test commands, protocol details, benchmarking and release work, see
 [Contributing](CONTRIBUTING.md).
 
+
+### Enums and custom wire types
+
+Annotate a defined string or integer type with `//gobridge:enum`. Export explicitly
+typed constants; omitted declarations in a typed `const` block inherit its type
+and support `iota`. Arbitrary inferred constant expressions are not discovered.
+
+```go
+//gobridge:enum
+type Mode string
+const (
+    Fast Mode = "fast"
+    Careful Mode = "careful"
+)
+```
+
+Generation adds `GobridgeEnum() map[string]Mode`. Python receives a `str, Enum`
+subclass (or `IntEnum` for integer types); TypeScript receives an `as const` object
+and a value-union type. Unknown values fail validation. Type-name overrides apply
+to enums too. For manual registration, implement that method yourself; do not
+combine a manual method with the annotation. Enum methods must be deterministic
+and work on a zero value. Only enum constants are exported by this feature;
+arbitrary package constants are not automatically exposed.
+
+An existing type with JSON/text marshalers can explicitly declare its wire type:
+
+```go
+type Identifier string
+func (Identifier) GobridgeWireType() reflect.Type { return reflect.TypeOf("") }
+func (v Identifier) MarshalText() ([]byte, error) { return []byte(v), nil }
+func (v *Identifier) UnmarshalText(data []byte) error {
+    // Validate the representation here before assigning it.
+    *v = Identifier(data)
+    return nil
+}
+```
+
+The wire type can be any supported type, including a struct. Go's JSON/text methods
+perform conversion; generated clients expose the declared wire representation.
+This works for wrappers around UUIDs, decimal strings, or custom JSON values,
+without adding dependencies to GoBridge. Implement both encoding and decoding for
+bidirectional types. `GobridgeWireType` must be deterministic, side-effect-free,
+and safe on a zero value; nil/self-referential mappings are rejected. It does not
+create a native Python UUID/Decimal class automatically.
+
+### Required, nullable, and omitted fields
+
+`required` and `nullable` tags control presence independently of pointer shape:
+
+```go
+type Patch struct {
+    Region *string `json:"region" required:"true"` // must be present; null allowed
+    Label *string `json:"label,omitempty" required:"false" nullable:"false"`
+}
+```
+
+A required field cannot also use `omitempty`. `required:"false"` permits omission;
+`nullable:"false"` rejects explicit null. Existing untagged pointers keep their
+optional/nullable behavior. In Python, explicitly optional fields and optional
+non-null fields default to `UNSET`; generated serializers omit that sentinel.
+`None` still means explicit JSON null. Import `UNSET` directly from your generated module, or use the generated field
+defaults.
+TypeScript uses `undefined`/absent properties for omission and `null` for null.
+
+This makes wire presence explicit; it does not give a Go pointer an additional
+presence bit. Use a purpose-built request type if a Go handler must distinguish
+omitted from explicitly null for the same optional, nullable field. A zero Go
+pointer can represent either after ordinary JSON decoding.
+
+### API snapshots for CI
+
+Snapshot the registry through its binary (including its embedded prefix):
+
+```sh
+./host bridge api --class Greeter > api-after.json
+gobridge api-diff --check api-before.json api-after.json
+```
+
+The snapshot contains both public language schemas and class names. Pass
+`--python-names` and `--typescript-names` JSON when reproducing per-module naming
+maps, including their `class` override; use the same configuration for both
+snapshots. Direct Go callers can use `registry.API(class, options...)` and
+`gobridge.DiffAPI(before, after)`.
+
+Diff output is deterministic JSON with paths, old/new values and a `breaking`
+flag. New operations and documentation-only edits are safe. Removals, renames,
+type/nullability/enum/constraint changes are conservatively flagged for review,
+even where a particular change may be compatible. `--check` fails if any such
+changes exist. Wire hashes are ignored for this comparison; exact runtime
+handshake checks remain unchanged. This is a schema-based compatibility check,
+not a behavioral or whole-package source-code compatibility proof.
 
 ### Bytes and time values
 
@@ -665,22 +916,13 @@ Go validates timestamp values. Monotonic clock readings and timezone location
 names are not carried over JSON. Durations use nanoseconds, never floating-point
 seconds. These codec kinds participate in the schema fingerprint.
 
-Other types with custom JSON or text marshalers still require explicit adapters.
+Other types with custom JSON or text marshalers must declare `GobridgeWireType`
+or use an explicit wrapper.
 
-## Breaking API changes
+## Upgrading
 
-The consolidated API removes overlapping entrypoints rather than keeping aliases:
-
-| Previous interface | Replacement |
-| --- | --- |
-| `NewObjectOptions(r, fn, ...)` | `NewObject(r, fn, ...)` for both constructor styles. |
-| Python runtime `AsyncClient` | `Client`, which supports sync calls and async `acall`/context management; generated `Greeter` and `SyncGreeter` remain distinct. |
-| `init --dry-run`, `build --dry-run` | `--check` on both commands. |
-| Flat manifest `name/source/command/class` | Entries in `modules`, with class names under the language settings. |
-| `python_distribution`, `python_requires` | `python.distribution`, `python.requires`. |
-| `npm_package`, `npm_dependencies` | `typescript.package`, `typescript.dependencies`. |
-| `python_package`, `typescript_package` | Each module's `python.package`, `typescript.package`. |
-| `build/dev --dir/--command/--name/--class` | Edit the module's manifest settings; dev selects with `--module`. |
-
-Create a manifest with `gobridge init` or the configuration example above. Regenerate
-Go adapters and rebuild Python/TypeScript packages together after upgrading.
+Regenerate Go adapters and rebuild Python/TypeScript packages together after
+upgrading GoBridge. Generated packages bundle their matching runtime; copying
+individual runtime files between versions is unsupported. Use API snapshots to
+review changes to your public bindings before publishing a new package version.
+Release history is in [CHANGELOG.md](CHANGELOG.md).

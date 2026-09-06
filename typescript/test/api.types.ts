@@ -31,3 +31,13 @@ async function examples(): Promise<void> {
   void [count, pid, invalid];
 }
 void examples;
+
+import {TypesPlus, Mode, Level, type Payload} from './typesplus.js';
+async function typedBatchTest(client: TypesPlus) {
+ const value: Payload={id:1n,pair:[1,2],mode:Mode.Fast,level:Level.Huge,key:'id-test',region:null};
+ const [a,b]=await client.batch([client.calls.roundTrip({value}),client.calls.signed({value:1n})]);
+ if(!a.error){const model:Payload=a.result;void model;}
+ if(!b.error){const integer:bigint=b.result;void integer;}
+ // @ts-expect-error generated batch descriptors validate public parameter names
+ client.calls.roundTrip({missing:1});
+}

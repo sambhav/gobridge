@@ -22,10 +22,11 @@ type Constraints struct {
 }
 
 type fieldMetadata struct {
-	name        string
-	typ         reflect.Type
-	description string
-	rules       *fieldRules
+	required, optional, nonNull bool
+	name                        string
+	typ                         reflect.Type
+	description                 string
+	rules                       *fieldRules
 }
 
 // Numeric and length comparisons use these typed values. Parsing tags and
@@ -33,6 +34,7 @@ type fieldMetadata struct {
 type fieldRules struct {
 	minimum, maximum           json.Number
 	minInt, maxInt             int64
+	minUint, maxUint           uint64
 	minFloat, maxFloat         float64
 	minLength, maxLength       int
 	hasMinLength, hasMaxLength bool
@@ -78,7 +80,24 @@ func prepareStruct(t reflect.Type) ([]fieldMetadata, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s.%s: %w", t, f.Name, err)
 		}
-		fields[j] = fieldMetadata{name: name, typ: f.Type, description: f.Tag.Get("doc"), rules: rules}
+		required, optional, nonNull := false, false, false
+		if tag, ok := f.Tag.Lookup("required"); ok {
+			if tag != "true" && tag != "false" {
+				return nil, fmt.Errorf("%s: required must be true or false", f.Name)
+			}
+			required = tag == "true"
+			optional = tag == "false"
+		}
+		if tag, ok := f.Tag.Lookup("nullable"); ok {
+			if tag != "true" && tag != "false" {
+				return nil, fmt.Errorf("%s: nullable must be true or false", f.Name)
+			}
+			nonNull = tag == "false"
+		}
+		if required && strings.Contains(f.Tag.Get("json"), ",omitempty") {
+			return nil, fmt.Errorf("%s: required fields cannot use omitempty", f.Name)
+		}
+		fields[j] = fieldMetadata{required: required, optional: optional, nonNull: nonNull, name: name, typ: f.Type, description: f.Tag.Get("doc"), rules: rules}
 	}
 	actual, _ := structMetadata.LoadOrStore(t, fields)
 	return actual.([]fieldMetadata), nil
@@ -96,9 +115,15 @@ func parseFieldRules(t reflect.Type, tag string) (*fieldRules, error) {
 		seenPointers[t] = true
 		t = t.Elem()
 	}
+	if wire, err := adaptedType(t); err != nil {
+		return nil, err
+	} else if wire != nil {
+		t = wire
+	}
+	isUnsigned := t.Kind() >= reflect.Uint && t.Kind() <= reflect.Uint64
 	isInteger := t.Kind() >= reflect.Int && t.Kind() <= reflect.Int64
 	isFloat := t.Kind() == reflect.Float32 || t.Kind() == reflect.Float64
-	hasLength := t.Kind() == reflect.String || t.Kind() == reflect.Slice || t.Kind() == reflect.Map
+	hasLength := t.Kind() == reflect.String || t.Kind() == reflect.Slice || t.Kind() == reflect.Array || t.Kind() == reflect.Map
 	r := &fieldRules{}
 	seen := map[string]bool{}
 	for _, part := range strings.Split(tag, ",") {
@@ -113,11 +138,22 @@ func parseFieldRules(t reflect.Type, tag string) (*fieldRules, error) {
 		seen[key] = true
 		switch key {
 		case "min", "max":
-			if !isInteger && !isFloat {
+			if !isInteger && !isFloat && !isUnsigned {
 				return nil, fmt.Errorf("%s applies only to numeric fields, not %s", key, t)
 			}
 			var number json.Number
-			if isInteger {
+			if isUnsigned {
+				n, err := strconv.ParseUint(value, 10, t.Bits())
+				if err != nil {
+					return nil, fmt.Errorf("%s must be an unsigned integer fitting %s", key, t)
+				}
+				number = json.Number(strconv.FormatUint(n, 10))
+				if key == "min" {
+					r.minUint = n
+				} else {
+					r.maxUint = n
+				}
+			} else if isInteger {
 				n, err := strconv.ParseInt(value, 10, t.Bits())
 				if err != nil {
 					return nil, fmt.Errorf("%s must be a decimal integer fitting %s", key, t)
@@ -168,7 +204,7 @@ func parseFieldRules(t reflect.Type, tag string) (*fieldRules, error) {
 		}
 	}
 	if r.minimum != "" && r.maximum != "" {
-		if (isInteger && r.minInt > r.maxInt) || (isFloat && r.minFloat > r.maxFloat) {
+		if (isUnsigned && r.minUint > r.maxUint) || (isInteger && r.minInt > r.maxInt) || (isFloat && r.minFloat > r.maxFloat) {
 			return nil, fmt.Errorf("min must not exceed max")
 		}
 	}
@@ -195,7 +231,18 @@ func (r *fieldRules) checkNumber(raw []byte, t reflect.Type) error {
 	if r == nil {
 		return nil
 	}
-	if t.Kind() >= reflect.Int && t.Kind() <= reflect.Int64 {
+	if t.Kind() >= reflect.Uint && t.Kind() <= reflect.Uint64 {
+		n, err := strconv.ParseUint(string(raw), 10, t.Bits())
+		if err != nil {
+			return fmt.Errorf("must be an unsigned integer representable as %s", t)
+		}
+		if r.minimum != "" && n < r.minUint {
+			return fmt.Errorf("must be at least %s", r.minimum)
+		}
+		if r.maximum != "" && n > r.maxUint {
+			return fmt.Errorf("must be at most %s", r.maximum)
+		}
+	} else if t.Kind() >= reflect.Int && t.Kind() <= reflect.Int64 {
 		n, err := strconv.ParseInt(string(raw), 10, t.Bits())
 		if err != nil {
 			return fmt.Errorf("must be an integer representable as %s", t)

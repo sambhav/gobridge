@@ -48,9 +48,9 @@ func TestCompactHelloPreservesIdentityWithoutConstructing(t *testing.T) {
 }
 
 func TestDirectResponseEncodingMatchesJSONEnvelope(t *testing.T) {
-	for _, response := range []Response{
+	for _, response := range []response{
 		{ID: "1", Result: nil}, {ID: "<&\"", Result: map[string]any{"text": "<&\u2028", "nil": nil}},
-		{ID: "2", Error: &Error{"invalid_argument", "bad input"}},
+		{ID: "2", Error: &Error{Code: "invalid_argument", Message: "bad input"}},
 	} {
 		want, err := json.Marshal(response)
 		if err != nil {
@@ -75,7 +75,7 @@ func TestCompactHelloFitsWhenFullSchemaExceedsFrameLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fullData, err := (Response{ID: "1", Result: full}).MarshalJSON()
+	fullData, err := (response{ID: "1", Result: full}).MarshalJSON()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestCompactHelloFitsWhenFullSchemaExceedsFrameLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	compactData, err := (Response{ID: "2", Result: compact}).MarshalJSON()
+	compactData, err := (response{ID: "2", Result: compact}).MarshalJSON()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,12 +118,12 @@ func TestServerCancellationBusyAndEOF(t *testing.T) {
 			t.Error(err)
 		}
 	}
-	read := func() Response {
+	read := func() response {
 		t.Helper()
 		if !scan.Scan() {
 			t.Fatal(scan.Err())
 		}
-		var resp Response
+		var resp response
 		if err := json.Unmarshal(scan.Bytes(), &resp); err != nil {
 			t.Fatal(err)
 		}

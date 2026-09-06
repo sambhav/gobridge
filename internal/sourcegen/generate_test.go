@@ -267,3 +267,52 @@ func (e *Example) Value()int{return 0}
 		t.Fatal(err)
 	}
 }
+
+func TestStreamYieldIsNotAnInput(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "stream.go", `package stream
+import "context"
+//gobridge:export
+func Count(ctx context.Context, n int, yield func(int) error) error { return yield(n) }
+`)
+	if err := Generate(dir, "zz_gobridge.gen.go"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "zz_gobridge.gen.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"count", Count, "n"`) || strings.Contains(string(data), `"yield"`) {
+		t.Fatal(string(data))
+	}
+}
+
+func TestEnumConstants(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "enum.go", `package enums
+//gobridge:enum
+type Level uint64
+const (
+ _ Level = iota
+ First
+ Second
+)
+//gobridge:export
+func Echo(value Level) Level {return value}
+`)
+	if err := Generate(dir, "zz_gobridge.gen.go"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "zz_gobridge.gen.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`func (Level) GobridgeEnum() map[string]Level`, `"First": First`, `"Second": Second`} {
+		if !strings.Contains(string(data), want) {
+			t.Fatal(string(data))
+		}
+	}
+	if err := Check(dir, "zz_gobridge.gen.go"); err != nil {
+		t.Fatal(err)
+	}
+}

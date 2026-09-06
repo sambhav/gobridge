@@ -67,7 +67,7 @@ func BenchmarkFrameDecode(b *testing.B) {
 
 func BenchmarkResponseEncoding(b *testing.B) {
 	for _, size := range []int{0, 1024, 65536} {
-		response := Response{ID: "1", Result: struct {
+		response := response{ID: "1", Result: struct {
 			Data []byte `json:"data"`
 		}{make([]byte, size)}}
 		for _, direct := range []bool{false, true} {
@@ -105,7 +105,7 @@ func BenchmarkHello(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				data, err := (Response{ID: "1", Result: value}).MarshalJSON()
+				data, err := (response{ID: "1", Result: value}).MarshalJSON()
 				if err != nil {
 					b.Fatal(err)
 				}

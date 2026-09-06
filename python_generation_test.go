@@ -59,6 +59,10 @@ class RuntimeOptions:
     timeout = 30
     max_pending = 128
     startup_timeout = 5
+class Call:
+    pass
+UnsetType = object
+UNSET = object()
 class Client:
     def __init__(self, command, **kwargs):
         self.command, self.kwargs = command, kwargs
@@ -90,8 +94,8 @@ def decode(cls, value):
     elif cls is str:
         assert type(value) is str
     return value
-def resolve_binary(path, stem): return ["bundled-" + stem]
-for name in ("RuntimeOptions", "Client", "DefaultControl", "decode", "resolve_binary"):
+def resolve_binary(path, stem): return "bundled-" + stem
+for name in ("UnsetType", "UNSET", "Call", "RuntimeOptions", "Client", "DefaultControl", "decode", "resolve_binary"):
     setattr(bridge, name, globals()[name])
 bridge.require_sync = lambda: None
 sys.modules["gobridge"] = bridge

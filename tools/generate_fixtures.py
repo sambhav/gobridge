@@ -6,6 +6,8 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = {
+    "typesplus": ("./internal/fixtures/typesplus", "TypesPlus"),
+    "streaming": ("./internal/fixtures/streaming", "Streaming"),
     "perf": ("./internal/fixtures/perf", "Perf"),
     "greeter": ("./examples/greeter/cmd/greeter", "Greeter"),
     "hello": ("./internal/fixtures/hello", "Hello"),

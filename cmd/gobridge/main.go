@@ -38,10 +38,14 @@ func runContext(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprintln(stderr, "Usage: gobridge init [--module example.com/project] [--name acme.greeter]")
+		fmt.Fprintln(stderr, "       gobridge api-diff [--check] before.json after.json")
 		fmt.Fprintln(stderr, "       gobridge generate [--dir .] [--output zz_gobridge.gen.go] [--check]")
 		fmt.Fprintln(stderr, "       gobridge dev [--once] [--typescript | --python build/<name>] [-- python app.py]")
 		fmt.Fprintln(stderr, "       gobridge build [--python] [--typescript] [--check] [--replace] [--output dist]")
 		return nil
+	}
+	if args[0] == "api-diff" {
+		return runAPIDiff(args[1:], os.Stdout)
 	}
 	if args[0] == "init" {
 		return runInit(args[1:], stderr)

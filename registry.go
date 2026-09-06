@@ -8,38 +8,42 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"regexp"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Error is a stable error code and a user-facing message, preserved in Python.
 type Error struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code    string            `json:"code"`
+	Message string            `json:"message"`
+	Details map[string]string `json:"details,omitempty"`
 }
 
 func (e *Error) Error() string           { return e.Code + ": " + e.Message }
-func Failure(code, message string) error { return &Error{code, message} }
+func Failure(code, message string) error { return &Error{Code: code, Message: message} }
 func wireError(err error) *Error {
 	var e *Error
 	if errors.As(err, &e) {
 		return e
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return &Error{"deadline_exceeded", "request deadline exceeded"}
+		return &Error{Code: "deadline_exceeded", Message: "request deadline exceeded"}
 	}
 	if errors.Is(err, context.Canceled) {
-		return &Error{"cancelled", "request cancelled"}
+		return &Error{Code: "cancelled", Message: "request cancelled"}
 	}
-	return &Error{"internal", err.Error()}
+	return &Error{Code: "internal", Message: "internal operation error"}
 }
 
 type operation struct {
 	name, description string
 	in, out           reflect.Type
 	inName            string
+	stream            func(context.Context, json.RawMessage, func(any) error) error
 	call              func(context.Context, json.RawMessage) (any, error)
 }
 
@@ -53,6 +57,9 @@ func (op operation) inputSchema() Type {
 
 // Registry is immutable once serving starts. Registration is not concurrent.
 type Registry struct {
+	commandPrefix   []string
+	logger          *slog.Logger
+	observer        func(context.Context, CallEvent)
 	pythonNames     Names
 	typescriptNames Names
 	ops             map[string]operation
@@ -156,6 +163,11 @@ func (r *Registry) names() []string {
 	return names
 }
 func (r *Registry) Call(ctx context.Context, name string, params json.RawMessage) (result any, err error) {
+	var started time.Time
+	if r.logger != nil || r.observer != nil {
+		started = time.Now()
+	}
+	defer func() { r.observe(ctx, name, started, err) }()
 	defer func() {
 		if recover() != nil {
 			result = nil
@@ -176,6 +188,9 @@ func (r *Registry) Call(ctx context.Context, name string, params json.RawMessage
 	// Do not invoke a context-free function after waiting for that initialization.
 	if err = ctx.Err(); err != nil {
 		return nil, err
+	}
+	if op.stream != nil {
+		return nil, Failure("failed_precondition", "use streaming invocation for this operation")
 	}
 	result, err = op.call(ctx, params)
 	if err == nil {

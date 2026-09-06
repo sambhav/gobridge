@@ -29,7 +29,7 @@ var pythonReserved = func() map[string]bool {
 	for n := range pythonKeywords {
 		m[n] = true
 	}
-	for _, n := range strings.Fields("call acall close aclose start lifecycle control aio RuntimeOptions DefaultControl _client command timeout max_pending expected_schema serve schema help generate_python generate_typescript") {
+	for _, n := range strings.Fields("calls batch abatch stream astream call acall close aclose start lifecycle control aio RuntimeOptions DefaultControl _client command timeout max_pending expected_schema serve api schema help generate_python generate_typescript") {
 		m[n] = true
 	}
 	return m
@@ -62,6 +62,14 @@ func validateType(t reflect.Type, seen map[reflect.Type]bool) error {
 	if t.Kind() == reflect.Pointer {
 		return validateType(t.Elem(), seen)
 	}
+	if wire, err := adaptedType(t); err != nil {
+		return err
+	} else if wire != nil {
+		return validateType(wire, seen)
+	}
+	if _, err := enumValues(t); err != nil {
+		return err
+	}
 	marshal := reflect.TypeOf((*json.Marshaler)(nil)).Elem()
 	unmarshal := reflect.TypeOf((*json.Unmarshaler)(nil)).Elem()
 	textMarshal := reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
@@ -73,9 +81,11 @@ func validateType(t reflect.Type, seen map[reflect.Type]bool) error {
 		return fmt.Errorf("custom JSON type %s needs an explicit adapter", t)
 	}
 	switch t.Kind() {
-	case reflect.String, reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Float32, reflect.Float64:
+	case reflect.String, reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Float32, reflect.Float64:
 		return nil
 	case reflect.Pointer:
+		return validateType(t.Elem(), seen)
+	case reflect.Array:
 		return validateType(t.Elem(), seen)
 	case reflect.Slice:
 		if t.Elem().Kind() == reflect.Uint8 {
@@ -128,6 +138,28 @@ func childPath(parent, field string) string {
 
 func validateNode(raw json.RawMessage, t reflect.Type, rules *fieldRules, path string) error {
 	raw = bytes.TrimSpace(raw)
+	if wire, err := adaptedType(t); err != nil {
+		return err
+	} else if wire != nil {
+		return validateNode(raw, wire, rules, path)
+	}
+	if values, _ := enumValues(t); len(values) > 0 {
+		value := reflect.New(t)
+		if err := json.Unmarshal(raw, value.Interface()); err != nil {
+			return validationAt(path, err)
+		}
+		canonical, _ := json.Marshal(value.Elem().Interface())
+		valid := false
+		for _, v := range values {
+			if bytes.Equal(canonical, v.Value) {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return validationAt(path, fmt.Errorf("unknown %s enum value", t.Name()))
+		}
+	}
 	if t.Kind() == reflect.Pointer {
 		if string(raw) == "null" {
 			return nil
@@ -175,10 +207,13 @@ func validateNode(raw json.RawMessage, t reflect.Type, rules *fieldRules, path s
 			v, ok := fields[f.name]
 			fieldPath := childPath(path, f.name)
 			if !ok {
-				if f.typ.Kind() == reflect.Pointer {
+				if !f.required && (f.optional || f.typ.Kind() == reflect.Pointer) {
 					continue
 				}
 				return validationAt(fieldPath, fmt.Errorf("missing required field"))
+			}
+			if f.nonNull && bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+				return validationAt(fieldPath, fmt.Errorf("null is not allowed"))
 			}
 			if err := validateNode(v, f.typ, f.rules, fieldPath); err != nil {
 				return err
@@ -188,10 +223,13 @@ func validateNode(raw json.RawMessage, t reflect.Type, rules *fieldRules, path s
 		for n := range fields {
 			return validationAt(childPath(path, n), fmt.Errorf("unknown field"))
 		}
-	case reflect.Slice:
+	case reflect.Slice, reflect.Array:
 		var values []json.RawMessage
 		if err := json.Unmarshal(raw, &values); err != nil {
 			return validationAt(path, err)
+		}
+		if t.Kind() == reflect.Array && len(values) != t.Len() {
+			return validationAt(path, fmt.Errorf("array requires exactly %d items", t.Len()))
 		}
 		if err := rules.checkLength(len(values)); err != nil {
 			return validationAt(path, err)
@@ -222,13 +260,15 @@ func validateNode(raw json.RawMessage, t reflect.Type, rules *fieldRules, path s
 			}
 			return validationAt(path, rules.checkLength(utf8.RuneCountInString(value)))
 		}
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Float32, reflect.Float64:
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Float32, reflect.Float64:
 		return validationAt(path, rules.checkNumber(raw, t))
 	}
 	return nil
 }
 
 type Type struct {
+	Enum   []EnumValue `json:"enum,omitempty"`
+	Length int         `json:"length,omitempty"`
 	goName string
 	Kind   string  `json:"kind"`
 	Name   string  `json:"name,omitempty"`
@@ -236,6 +276,9 @@ type Type struct {
 	Fields []Field `json:"fields,omitempty"`
 }
 type Field struct {
+	Required                   bool   `json:"required,omitempty"`
+	Optional                   bool   `json:"optional,omitempty"`
+	NonNull                    bool   `json:"non_null,omitempty"`
 	PublicName                 string `json:"public_name,omitempty"`
 	pythonName, typescriptName string
 	goName                     string
@@ -245,6 +288,7 @@ type Field struct {
 	Constraints                *Constraints `json:"constraints,omitempty"`
 }
 type Operation struct {
+	Stream      bool   `json:"stream,omitempty"`
 	PublicName  string `json:"public_name,omitempty"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -271,9 +315,23 @@ func describe(t reflect.Type) Type {
 	if t == reflect.TypeOf([]byte(nil)) {
 		return Type{Kind: "bytes"}
 	}
+	if wire, _ := adaptedType(t); wire != nil {
+		return describe(wire)
+	}
 	s := Type{Kind: t.Kind().String()}
+	if values, _ := enumValues(t); len(values) > 0 {
+		s.Enum = make([]EnumValue, len(values))
+		for i, value := range values {
+			s.Enum[i] = EnumValue{Name: value.Name, Value: append(json.RawMessage(nil), value.Value...)}
+		}
+		s.Name = t.Name()
+		s.goName = t.PkgPath() + "." + t.Name()
+	}
+	if t.Kind() == reflect.Array {
+		s.Length = t.Len()
+	}
 	switch t.Kind() {
-	case reflect.Pointer, reflect.Slice, reflect.Map:
+	case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
 		e := describe(t.Elem())
 		s.Elem = &e
 	case reflect.Struct:
@@ -281,7 +339,7 @@ func describe(t reflect.Type) Type {
 		s.goName = t.PkgPath() + "." + t.Name()
 		fields, _ := prepareStruct(t)
 		for _, f := range fields {
-			s.Fields = append(s.Fields, Field{Name: f.name, goName: t.Field(len(s.Fields)).Name, pythonName: t.Field(len(s.Fields)).Tag.Get("python"), typescriptName: t.Field(len(s.Fields)).Tag.Get("ts"), Type: describe(f.typ), Description: f.description, Constraints: f.rules.schema()})
+			s.Fields = append(s.Fields, Field{Required: f.required, Optional: f.optional, NonNull: f.nonNull, Name: f.name, goName: t.Field(len(s.Fields)).Name, pythonName: t.Field(len(s.Fields)).Tag.Get("python"), typescriptName: t.Field(len(s.Fields)).Tag.Get("ts"), Type: describe(f.typ), Description: f.description, Constraints: f.rules.schema()})
 		}
 	}
 	return s
@@ -290,7 +348,7 @@ func (r *Registry) Schema() Schema {
 	s := Schema{Protocol: 1, Operations: []Operation{}}
 	for _, n := range r.names() {
 		op := r.ops[n]
-		s.Operations = append(s.Operations, Operation{Name: n, Description: op.description, Input: op.inputSchema(), Output: describe(op.out)})
+		s.Operations = append(s.Operations, Operation{Stream: op.stream != nil, Name: n, Description: op.description, Input: op.inputSchema(), Output: describe(op.out)})
 	}
 	data, _ := json.Marshal(s.Operations)
 	if r.constructor != nil {
@@ -303,4 +361,12 @@ func (r *Registry) Schema() Schema {
 	}
 	s.Hash = fmt.Sprintf("%x", sha256.Sum256(data))
 	return s
+}
+
+func (f Field) optional() bool { return !f.Required && (f.Optional || f.Type.Kind == "ptr") }
+func (f Field) valueType() Type {
+	if f.NonNull && f.Type.Kind == "ptr" {
+		return *f.Type.Elem
+	}
+	return f.Type
 }

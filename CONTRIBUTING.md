@@ -19,6 +19,8 @@ ignored output directories. `examples/greeter` is the public library example;
 `internal/fixtures` holds programs for protocol, type, and lifecycle tests.
 The second compiles Node runtime/generated types,
 checks invalid type examples, and tests real Go binaries and malformed peers.
+For changes to packaging or embedding, run `python tools/test_embedded.py`,
+`python tools/test_modules.py` and `python tools/test_project_build.py`.
 After building packages, `python tools/test_wheel.py` and
 `python tools/test_npm.py` verify clean installs.
 `python tools/test_project_build.py` checks the standalone author CLI from a
@@ -43,11 +45,16 @@ can arrive out of order and contain exactly one result or error.
 {"method":"$cancel","params":{"id":"2"}}
 ```
 
-The handshake returns protocol, schema hash and operations. A constructor schema
+The generated clients request a compact handshake with protocol, schema hash
+and constructor presence; full schema inspection also includes operations. A constructor schema
 adds one `$init` before calls. SHA-256 hashes include docs/constraints using Go's
 sorted-schema JSON; bindings embed that hash. Invalid framing, duplicate IDs and
 malformed envelopes terminate the session; ordinary application errors do not.
-Crashes never implicitly replay work. Error codes include `invalid_argument`,
+Streams use bounded pull cursors with cancellation and a 30-second idle/read
+lease. Unary batches run in input order with at most 128 entries and a bounded
+response budget. Neither batching nor transport recovery replays work. The wire
+request/response structs are private implementation details; hosts use `Serve`.
+Error codes include `invalid_argument`,
 `not_found`, `busy`, `cancelled`, `deadline_exceeded`, `resource_exhausted`,
 `internal`, and application codes.
 
@@ -65,16 +72,64 @@ precompiled constraints; bounded admission keeps cancellation responsive. EOF
 cancels and returns even for uncooperative handlers; the host owns final exit
 and unblocking borrowed readers.
 
-## Performance
+## Performance and lifecycle checks
+
+Reuse a client to retain its Go process and amortize startup. Enter a Python
+client context or call TypeScript `start()` during application startup to prewarm
+it. Independent clients and forked workers own independent Go state. Typed
+batches reduce round trips; a slice-taking Go operation can also batch work inside
+one handler. Both remain subject to the frame limit.
+
+Use one cross-language benchmark runner:
 
 ```sh
-python tools/benchmark.py --calls 1000
+npm ci --ignore-scripts --prefix typescript
+python tools/bench.py --calls 2000 --repeats 5 --output /tmp/before.json
+# Apply the change, then rebuild and compare.
+python tools/bench.py --calls 2000 --repeats 5 --output /tmp/after.json --compare /tmp/before.json
 go test -run '^$' -bench . -benchmem
 ```
 
-CI uploads benchmark results; timings are not a pass/fail gate. Measure realistic
-payloads and saturation on your target host. Reuse processes and batch useful work
-to amortize IPC.
+The runner builds fixtures and checks generated TypeScript. It compares native
+Go, Python sync/async and TypeScript using small calls, nested models, bytes and
+CPU work. Select `--cases tiny,nested`, `--clients python-sync,typescript` or
+`--concurrency 1,32` to narrow the run. `--skip-build` is only for fixtures already
+built from the measured revision. CI uploads fresh JSON/Markdown reports; timings
+are descriptive and never a pass/fail gate.
+
+Each client reuses a daemon after 50 warm-up calls. Fixed workers generate
+closed-loop load; percentiles include waiting behind concurrent calls. Native Go
+excludes serialization, conversion and IPC. Cold-first-call samples include the
+handshake, but exclude interpreter startup/imports. Linux process-tree RSS is
+sampled every 50 ms and can miss peaks or count shared pages repeatedly; other
+platforms report null. Preserve raw reports outside the source tree when comparing
+revisions, record tool versions and alternate measurement order on an idle host.
+Historical timings do not establish current throughput guarantees.
+
+For targeted codec and build investigations:
+
+```sh
+node tools/bench_codecs.mjs /path/to/baseline/typescript/dist/codec.js
+python tools/bench_decode.py --baseline /path/to/baseline/python/src/gobridge/runtime.py
+python tools/bench_build.py
+```
+
+`bench_python.py` and `bench_node.mjs` are the main runner's worker programs.
+Generated TypeScript compiles immutable codec plans without eval; Python caches
+bounded decode plans. Packaging shares Go build output within staging and relies
+on the Go compiler cache. These optimizations do not introduce a shared daemon
+or automatic result cache. Application caching uses `Memo` explicitly.
+
+```sh
+go test -run '^$' -fuzz '^FuzzDecodeInput$' -fuzztime 30s -parallel 2
+go test -run '^$' -fuzz '^FuzzProtocolFrames$' -fuzztime 30s -parallel 2
+python tools/stress.py --rounds 100
+```
+
+Decoder fuzzing uses the retained test-only strict decoder as an oracle. Protocol
+fuzzing exercises malformed frames against a real server. Stress checks cover
+cancellation, daemon death, admission limits and cleanup. Keep these test oracles
+and fixtures even when they are not referenced by production code.
 
 ## Releases from GitHub
 
@@ -84,8 +139,8 @@ packages carry their runtime privately; no gobridge runtime or example package
 is published to PyPI/npm. Authors may publish their own generated packages there.
 
 1. Squash-merge with a title such as `fix: ...` or `feat: ...`. Merges to `main`
-   create or refresh a release PR. Before 1.0, breaking changes (`feat!: ...`) bump
-   the minor version and fixes bump the patch.
+   create or refresh a release PR. Breaking changes (`feat!: ...`) bump the major
+   version; features bump the minor version and fixes bump the patch.
 2. Review and merge the release PR in GitHub. Automation creates `vX.Y.Z`, runs
    the full CI matrix on that exact tag, and publishes six CLI archives and their
    SHA-256 checksums to GitHub Releases. Ordinary merges accumulate in the release

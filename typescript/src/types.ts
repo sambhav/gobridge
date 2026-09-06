@@ -6,6 +6,9 @@ export interface Constraints {
   readonly max_length?: number;
 }
 export interface Field {
+ readonly required?:boolean;
+ readonly optional?:boolean;
+ readonly non_null?:boolean;
   readonly public_name?: string;
   readonly name: string;
   readonly type: WireType;
@@ -14,11 +17,14 @@ export interface Field {
 }
 export interface WireType {
   readonly kind: string;
+  readonly enum?: readonly {name:string; value:string | number | bigint}[];
+  readonly length?: number;
   readonly name?: string;
   readonly elem?: WireType;
   readonly fields?: readonly Field[];
 }
 export interface Operation {
+  readonly stream?: boolean;
   readonly name: string;
   readonly description: string;
   readonly input: WireType;
