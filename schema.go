@@ -229,18 +229,23 @@ func validateNode(raw json.RawMessage, t reflect.Type, rules *fieldRules, path s
 }
 
 type Type struct {
+	goName string
 	Kind   string  `json:"kind"`
 	Name   string  `json:"name,omitempty"`
 	Elem   *Type   `json:"elem,omitempty"`
 	Fields []Field `json:"fields,omitempty"`
 }
 type Field struct {
-	Name        string       `json:"name"`
-	Type        Type         `json:"type"`
-	Description string       `json:"description,omitempty"`
-	Constraints *Constraints `json:"constraints,omitempty"`
+	PublicName                 string `json:"public_name,omitempty"`
+	pythonName, typescriptName string
+	goName                     string
+	Name                       string       `json:"name"`
+	Type                       Type         `json:"type"`
+	Description                string       `json:"description,omitempty"`
+	Constraints                *Constraints `json:"constraints,omitempty"`
 }
 type Operation struct {
+	PublicName  string `json:"public_name,omitempty"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Input       Type   `json:"input"`
@@ -273,9 +278,10 @@ func describe(t reflect.Type) Type {
 		s.Elem = &e
 	case reflect.Struct:
 		s.Name = t.Name()
+		s.goName = t.PkgPath() + "." + t.Name()
 		fields, _ := prepareStruct(t)
 		for _, f := range fields {
-			s.Fields = append(s.Fields, Field{Name: f.name, Type: describe(f.typ), Description: f.description, Constraints: f.rules.schema()})
+			s.Fields = append(s.Fields, Field{Name: f.name, goName: t.Field(len(s.Fields)).Name, pythonName: t.Field(len(s.Fields)).Tag.Get("python"), typescriptName: t.Field(len(s.Fields)).Tag.Get("ts"), Type: describe(f.typ), Description: f.description, Constraints: f.rules.schema()})
 		}
 	}
 	return s
@@ -284,11 +290,11 @@ func (r *Registry) Schema() Schema {
 	s := Schema{Protocol: 1, Operations: []Operation{}}
 	for _, n := range r.names() {
 		op := r.ops[n]
-		s.Operations = append(s.Operations, Operation{n, op.description, op.inputSchema(), describe(op.out)})
+		s.Operations = append(s.Operations, Operation{Name: n, Description: op.description, Input: op.inputSchema(), Output: describe(op.out)})
 	}
 	data, _ := json.Marshal(s.Operations)
 	if r.constructor != nil {
-		t := describe(r.constructor.config)
+		t := r.constructor.schema()
 		s.Constructor = &t
 		data, _ = json.Marshal(struct {
 			Operations  []Operation `json:"operations"`

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -54,7 +55,17 @@ func buildDevTypeScript(ctx context.Context, options devOptions, binary string, 
 	if err != nil {
 		return err
 	}
+	moduleArgs := []string{}
+	if options.selectedModule != nil {
+		data, _ := json.Marshal([]resolvedModule{*options.selectedModule})
+		path := filepath.Join(tooling, "modules.json")
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			return err
+		}
+		moduleArgs = []string{"--modules", path}
+	}
 	cmd := exec.CommandContext(ctx, interpreter, filepath.Join(tooling, "tools", "build_npm.py"), "--project", absolute("."), "--package", options.NPMPackage, "--class", options.Class, "--binary", options.binaryName(), "--version", options.Version, "--targets", runtime.GOOS+"-"+runtime.GOARCH, "--host-binary", binary, "--dev-output", options.output)
+	cmd.Args = append(cmd.Args, moduleArgs...)
 	cmd.Stdout = log
 	cmd.Stderr = log
 	return cmd.Run()

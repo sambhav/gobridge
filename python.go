@@ -58,7 +58,7 @@ func pyFields(b *strings.Builder, fields []Field) {
 		if f.Type.Kind == "ptr" {
 			def = " = None"
 		}
-		fmt.Fprintf(b, ", %s: %s%s", f.Name, pyType(f.Type), def)
+		fmt.Fprintf(b, ", %s: %s%s", f.publicName(), pyType(f.Type), def)
 	}
 }
 
@@ -68,7 +68,7 @@ func pyParams(b *strings.Builder, fields []Field) {
 		if j > 0 {
 			fmt.Fprint(b, ", ")
 		}
-		fmt.Fprintf(b, "%q: %s", f.Name, f.Name)
+		fmt.Fprintf(b, "%q: %s", f.Name, f.publicName())
 	}
 	fmt.Fprint(b, "}")
 }
@@ -88,8 +88,12 @@ func pyMethod(b *strings.Builder, op Operation, name, indent, prefix, receiver, 
 
 // GeneratePython emits concrete dataclasses, constructors and keyword-only
 // functions/methods, plus lazy module defaults and explicit scope controls.
-func (r *Registry) GeneratePython(w io.Writer, class, binary string) error {
-	if !regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`).MatchString(class) {
+func (r *Registry) GeneratePython(w io.Writer, class, binary string, options ...Option) error {
+	s, class, err := r.bindingSchema("python", class, options)
+	if err != nil {
+		return err
+	}
+	if !regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`).MatchString(class) {
 		return fmt.Errorf("class must be a Python class identifier")
 	}
 	if !regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(binary) {
@@ -129,7 +133,6 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string) error {
 		}
 		return nil
 	}
-	s := r.Schema()
 	if s.Constructor != nil {
 		if err := visit(*s.Constructor); err != nil {
 			return err
@@ -137,14 +140,14 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string) error {
 	}
 	operations := map[string]bool{}
 	for _, op := range s.Operations {
-		operations[op.Name] = true
+		operations[op.publicName()] = true
 	}
 	for _, op := range s.Operations {
-		if reserved[op.Name] {
-			return fmt.Errorf("operation %s conflicts with generated symbols", op.Name)
+		if reserved[op.publicName()] {
+			return fmt.Errorf("operation %s conflicts with generated symbols", op.publicName())
 		}
-		if operations[op.Name+"_sync"] || reserved[op.Name+"_sync"] {
-			return fmt.Errorf("operation %s conflicts with generated sync helper %s_sync", op.Name, op.Name)
+		if operations[op.publicName()+"_sync"] || reserved[op.publicName()+"_sync"] {
+			return fmt.Errorf("operation %s conflicts with generated sync helper %s_sync", op.publicName(), op.publicName())
 		}
 		if err := visit(op.Input); err != nil {
 			return err
@@ -154,11 +157,11 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string) error {
 		}
 	}
 	for _, op := range s.Operations {
-		if _, ok := types[op.Name]; ok {
-			return fmt.Errorf("operation %s conflicts with generated type", op.Name)
+		if _, ok := types[op.publicName()]; ok {
+			return fmt.Errorf("operation %s conflicts with generated type", op.publicName())
 		}
-		if _, ok := types[op.Name+"_sync"]; ok {
-			return fmt.Errorf("sync helper %s_sync conflicts with generated type", op.Name)
+		if _, ok := types[op.publicName()+"_sync"]; ok {
+			return fmt.Errorf("sync helper %s_sync conflicts with generated type", op.publicName())
 		}
 	}
 	var b strings.Builder
@@ -170,7 +173,7 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string) error {
 	sort.Strings(names)
 	exports := append([]string{class, "Sync" + class, "configure", "session", "session_sync", "shutdown", "shutdown_sync"}, names...)
 	for _, op := range s.Operations {
-		exports = append(exports, op.Name, op.Name+"_sync")
+		exports = append(exports, op.publicName(), op.publicName()+"_sync")
 	}
 	data, _ := json.Marshal(exports)
 	fmt.Fprintf(&b, "__all__ = %s\n\n", data)
@@ -185,6 +188,9 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string) error {
 				def = " = None"
 			}
 			metadata := map[string]any{}
+			if f.publicName() != f.Name {
+				metadata["wire_name"] = f.Name
+			}
 			if f.Description != "" {
 				metadata["description"] = f.Description
 			}
@@ -204,7 +210,7 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string) error {
 				}
 				def += ")"
 			}
-			fmt.Fprintf(&b, "    %s: %s%s\n", f.Name, pyType(f.Type), def)
+			fmt.Fprintf(&b, "    %s: %s%s\n", f.publicName(), pyType(f.Type), def)
 		}
 		fmt.Fprintln(&b)
 	}
@@ -237,13 +243,13 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string) error {
 			fmt.Fprint(&b, "        _bridge_require_sync()\n        return super().__enter__()\n\n")
 		}
 		for _, op := range s.Operations {
-			pyMethod(&b, op, op.Name, "    ", prefix, "self, ", call)
+			pyMethod(&b, op, op.publicName(), "    ", prefix, "self, ", call)
 		}
 	}
 	fmt.Fprintf(&b, "_bridge_defaults = _bridge_Defaults(Sync%s)\n\n", class)
 	for _, op := range s.Operations {
-		pyMethod(&b, op, op.Name, "", "async ", "", "await _bridge_defaults.client().acall")
-		pyMethod(&b, op, op.Name+"_sync", "", "", "", "_bridge_defaults.client().call")
+		pyMethod(&b, op, op.publicName(), "", "async ", "", "await _bridge_defaults.client().acall")
+		pyMethod(&b, op, op.publicName()+"_sync", "", "", "", "_bridge_defaults.client().call")
 	}
 	for _, name := range []string{"configure", "session", "session_sync"} {
 		fmt.Fprintf(&b, "def %s(command=None, *", name)
@@ -260,7 +266,7 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string) error {
 		fmt.Fprint(&b, "    _bridge_kwargs = {\"command\": command, \"_runtime\": _runtime")
 		if s.Constructor != nil {
 			for _, field := range s.Constructor.Fields {
-				fmt.Fprintf(&b, ", %q: %s", field.Name, field.Name)
+				fmt.Fprintf(&b, ", %q: %s", field.publicName(), field.publicName())
 			}
 		}
 		fmt.Fprint(&b, "}\n")
@@ -274,6 +280,6 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string) error {
 		}
 	}
 	fmt.Fprint(&b, "async def shutdown() -> None:\n    \"\"\"Close/reset the module default; explicit sessions stay open.\"\"\"\n    await _bridge_defaults.aclose()\n\ndef shutdown_sync() -> None:\n    \"\"\"Close/reset the default from synchronous code.\"\"\"\n    _bridge_require_sync()\n    _bridge_defaults.close()\n")
-	_, err := io.WriteString(w, b.String())
+	_, err = io.WriteString(w, b.String())
 	return err
 }

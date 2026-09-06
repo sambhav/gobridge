@@ -120,12 +120,12 @@ function transform(type: WireType, value: unknown, input: boolean, path: string)
     case "struct": {
       if (!record(value)) return fail("expected an object");
       const fields = type.fields ?? [];
-      const allowed = new Set(fields.map(field => input ? camelCase(field.name) : field.name));
+      const allowed = new Set(fields.map(field => input ? (field.public_name ?? camelCase(field.name)) : field.name));
       for (const key of Object.keys(value)) if (!allowed.has(key)) return fail(`unknown field ${key}`);
       const entries: [string, unknown][] = [];
       for (const field of fields) {
-        const name = input ? camelCase(field.name) : field.name;
-        const outputName = input ? field.name : camelCase(field.name);
+        const name = input ? (field.public_name ?? camelCase(field.name)) : field.name;
+        const outputName = input ? field.name : (field.public_name ?? camelCase(field.name));
         if (!Object.hasOwn(value, name) || (input && value[name] === undefined)) {
           if (field.type.kind === "ptr") continue;
           return fail(`missing field ${name}`);
@@ -182,8 +182,8 @@ export function compileCodec<T = unknown>(type: WireType): {
     }
     if (type.kind === "struct") {
       const fields = (type.fields ?? []).map(field => ({
-        name: input ? camelCase(field.name) : field.name,
-        output: input ? field.name : camelCase(field.name),
+        name: input ? (field.public_name ?? camelCase(field.name)) : field.name,
+        output: input ? field.name : (field.public_name ?? camelCase(field.name)),
         optional: field.type.kind === "ptr",
         convert: compile(field.type, input),
       }));

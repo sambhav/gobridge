@@ -11,19 +11,22 @@ import (
 )
 
 type project struct {
-	PythonPackage      string            `json:"python_package,omitempty"`
-	TypeScriptPackage  string            `json:"typescript_package,omitempty"`
-	PythonRequires     []string          `json:"python_requires,omitempty"`
-	NPMDependencies    map[string]string `json:"npm_dependencies,omitempty"`
-	Name               string            `json:"name"`
-	Class              string            `json:"class"`
-	Command            string            `json:"command"`
-	Source             string            `json:"source"`
-	Version            string            `json:"version"`
-	PythonDistribution string            `json:"python_distribution"`
-	NPMPackage         string            `json:"npm_package"`
-	Repository         string            `json:"repository"`
-	License            string            `json:"license"`
+	Modules            []module                `json:"modules,omitempty"`
+	Python             *pythonDistribution     `json:"python,omitempty"`
+	TypeScript         *typescriptDistribution `json:"typescript,omitempty"`
+	PythonPackage      string                  `json:"python_package,omitempty"`
+	TypeScriptPackage  string                  `json:"typescript_package,omitempty"`
+	PythonRequires     []string                `json:"python_requires,omitempty"`
+	NPMDependencies    map[string]string       `json:"npm_dependencies,omitempty"`
+	Name               string                  `json:"name"`
+	Class              string                  `json:"class"`
+	Command            string                  `json:"command"`
+	Source             string                  `json:"source"`
+	Version            string                  `json:"version"`
+	PythonDistribution string                  `json:"python_distribution"`
+	NPMPackage         string                  `json:"npm_package"`
+	Repository         string                  `json:"repository"`
+	License            string                  `json:"license"`
 }
 
 func loadProject() (project, error) {
@@ -48,6 +51,23 @@ func loadProject() (project, error) {
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
 		return p, fmt.Errorf("gobridge.json: expected one JSON object")
+	}
+	if p.Python != nil {
+		if p.PythonDistribution != "" || p.PythonRequires != nil {
+			return p, fmt.Errorf("use python or legacy python_distribution/python_requires, not both")
+		}
+		p.PythonDistribution = p.Python.Distribution
+		p.PythonRequires = p.Python.Requires
+	}
+	if p.TypeScript != nil {
+		if p.NPMPackage != "" || p.NPMDependencies != nil {
+			return p, fmt.Errorf("use typescript or legacy npm_package/npm_dependencies, not both")
+		}
+		p.NPMPackage = p.TypeScript.Package
+		p.NPMDependencies = p.TypeScript.Dependencies
+	}
+	if len(p.Modules) > 0 && (p.Source != "" || p.Class != "" || p.PythonPackage != "" || p.TypeScriptPackage != "" || p.Command != ".") {
+		return p, fmt.Errorf("put source, command, class and package additions inside modules")
 	}
 	return p, nil
 }
@@ -74,7 +94,7 @@ func (p *project) validate() error {
 			}
 		}
 	}
-	if !regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`).MatchString(p.Class) {
+	if !regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`).MatchString(p.Class) {
 		return fmt.Errorf("class must be a capitalized identifier")
 	}
 	for _, reserved := range strings.Fields("Client AsyncClient RuntimeOptions DefaultControl Promise Record Uint8Array") {

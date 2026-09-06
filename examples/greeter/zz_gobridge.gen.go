@@ -5,8 +5,8 @@ package greeter
 import _gobridge "github.com/sambhav/gobridge"
 
 // NewGobridge registers annotated operations without running their constructors.
-func NewGobridge() (*_gobridge.Registry, error) {
-	_registry := _gobridge.New()
+func NewGobridge(_options ..._gobridge.Option) (*_gobridge.Registry, error) {
+	_registry := _gobridge.New(_options...)
 	_object, _err := _gobridge.NewObject(_registry, NewGreeter)
 	if _err != nil {
 		return nil, _err

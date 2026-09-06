@@ -50,6 +50,7 @@ def pack(stage, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--modules", type=Path, help="resolved module manifest from gobridge build")
     parser.add_argument("--targets", nargs="+", choices=TARGETS, default=list(TARGETS))
     parser.add_argument("--build-cache", type=Path, help="reuse Go link outputs; Go still checks sources and flags")
     parser.add_argument("--go-package", default="./examples/greeter/cmd/greeter", help="Go command package to build")
@@ -67,7 +68,7 @@ def main():
     if args.host_binary and not args.dev_output:
         parser.error("--host-binary requires --dev-output")
     project = args.project.resolve()
-    if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", args.client_class):
+    if not re.fullmatch(r"[A-Z][A-Za-z0-9_]*", args.client_class):
         parser.error("--class must be a capitalized class identifier")
     if not re.fullmatch(r"[A-Za-z0-9_-]+", args.binary):
         parser.error("--binary must be a filename stem using letters, digits, _ or -")
@@ -86,27 +87,43 @@ def main():
         output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="gobridge-npm-") as temp:
         temporary = Path(temp)
-        host = temporary / (args.binary + (".exe" if os.name == "nt" else ""))
-        host_env = {key: value for key, value in os.environ.items() if key not in {"GOOS", "GOARCH"}}
-        host_env["CGO_ENABLED"] = "0"
-        if args.host_binary:
-            shutil.copyfile(args.host_binary, host)
-            host.chmod(0o755)
-        else:
-            build_go_binary(host, args.go_package, project, host_env, cache=args.build_cache)
-            host.chmod(0o755)
-        bindings = subprocess.check_output([
-            str(host), "generate-typescript", "--class", args.client_class, "--binary", args.binary,
-        ])
+        modules = json.loads(args.modules.read_text()) if args.modules else [{
+            "command": args.go_package, "binary": args.binary,
+            "typescript": {"export": ".", "class": args.client_class},
+        }]
         stage = temporary / "package"
         source = stage / "src"
         source.mkdir(parents=True)
-        shutil.copytree(RUNTIME / "src", source / "_gobridge")
-        custom = copy_package(project, "typescript", source)
-        generated = "generated.ts" if custom else "index.ts"
-        (source / generated).write_bytes(bindings.replace(b'from "gobridge-runtime"', b'from "./_gobridge/index.js"'))
-        if custom and not (source / "index.ts").exists():
-            (source / "index.ts").write_text('export * from "./generated.js";\n')
+        exports = {}
+        custom = False
+        for index, module in enumerate(modules):
+            config = module["typescript"]
+            export = config["export"]
+            relative = "" if export == "." else export[2:]
+            module["directory"] = relative
+            directory = source / relative
+            directory.mkdir(parents=True, exist_ok=True)
+            if (directory / "index.ts").exists() or (directory / "generated.ts").exists():
+                raise ValueError(f"module collides with package additions: {export}")
+            host = temporary / (f"host{index}" + (".exe" if os.name == "nt" else ""))
+            host_env = {key: value for key, value in os.environ.items() if key not in {"GOOS", "GOARCH"}}
+            host_env["CGO_ENABLED"] = "0"
+            if args.host_binary:
+                shutil.copyfile(args.host_binary, host)
+            else:
+                build_go_binary(host, module["command"], project, host_env, cache=args.build_cache)
+            host.chmod(0o755)
+            bindings = subprocess.check_output([str(host), "generate-typescript", "--class", config["class"],
+                "--binary", module["binary"], "--names", json.dumps(config.get("rename", {}))])
+            shutil.copytree(RUNTIME / "src", directory / "_gobridge")
+            module_custom = copy_package(project, "typescript", directory, config.get("package", "") if args.modules else None)
+            custom = custom or module_custom
+            generated = "generated.ts" if module_custom else "index.ts"
+            (directory / generated).write_bytes(bindings.replace(b'from "gobridge-runtime"', b'from "./_gobridge/index.js"'))
+            if module_custom and not (directory / "index.ts").exists():
+                (directory / "index.ts").write_text('export * from "./generated.js";\n')
+            prefix = "./" + (relative + "/" if relative else "")
+            exports[export] = {"types": prefix + "index.d.ts", "import": prefix + "index.js"}
         manifest = {
             "name": args.package,
             "version": version,
@@ -114,15 +131,17 @@ def main():
             "type": "module",
             "main": "./index.js",
             "types": "./index.d.ts",
-            "exports": {".": {"types": "./index.d.ts", "import": "./index.js"}},
+            "exports": exports,
             "files": ["index.js", "index.d.ts", "_bin", "_gobridge", "LICENSE", "README.md"],
             "license": args.license or "UNLICENSED",
             "engines": {"node": ">=24"},
         }
-        dependencies = settings(project).get("npm_dependencies", {})
+        if "." not in exports:
+            manifest.pop("main"); manifest.pop("types")
+        dependencies = settings(project).get("typescript", {}).get("dependencies", settings(project).get("npm_dependencies", {}))
         if dependencies:
             manifest["dependencies"] = dependencies
-        if custom:
+        if custom or args.modules:
             manifest["files"] = ["**/*", "!src", "!compiled", "!tsconfig.json"]
         if args.repository:
             manifest["repository"] = {"type": "git", "url": args.repository}
@@ -160,19 +179,21 @@ def main():
                         raise ValueError(f"package asset collides with generated output: {destination.name}")
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(asset, destination)
-        shutil.copyfile(ROOT / "LICENSE", stage / "_gobridge" / "LICENSE")
-        for target in args.targets:
-            goos, goarch, node_target = TARGETS[target]
-            binary_dir = stage / "_bin" / node_target
-            binary_dir.mkdir(parents=True)
-            binary = binary_dir / (args.binary + (".exe" if goos == "windows" else ""))
-            env = dict(os.environ, GOOS=goos, GOARCH=goarch, CGO_ENABLED="0")
-            if args.host_binary:
-                shutil.copyfile(host, binary)
-            else:
-                build_go_binary(binary, args.go_package, project, env, cache=args.build_cache, trimpath=True)
-            binary.chmod(0o755)
-            print("Built", node_target, flush=True)
+        for module in modules:
+            module_stage = stage / module["directory"]
+            shutil.copyfile(ROOT / "LICENSE", module_stage / "_gobridge" / "LICENSE")
+            for target in args.targets:
+                goos, goarch, node_target = TARGETS[target]
+                binary_dir = module_stage / "_bin" / node_target
+                binary_dir.mkdir(parents=True)
+                binary = binary_dir / (module["binary"] + (".exe" if goos == "windows" else ""))
+                env = dict(os.environ, GOOS=goos, GOARCH=goarch, CGO_ENABLED="0")
+                if args.host_binary:
+                    shutil.copyfile(host, binary)
+                else:
+                    build_go_binary(binary, module["command"], project, env, cache=args.build_cache, trimpath=True)
+                binary.chmod(0o755)
+                print("Built", node_target, flush=True)
         if args.dev_output:
             destination = args.dev_output.resolve()
             shutil.rmtree(stage / "node_modules", ignore_errors=True)
@@ -191,9 +212,10 @@ def main():
                     staged = Path(temporary_revision) / revision
                     shutil.copytree(stage, staged)
                     os.replace(staged, target)
-            manifest["main"] = f"./{revision}/index.js"
-            manifest["types"] = f"./{revision}/index.d.ts"
-            manifest["exports"] = {".": {"types": manifest["types"], "import": manifest["main"]}}
+            manifest["exports"] = {key: {kind: f"./{revision}/" + path[2:] for kind, path in value.items()} for key, value in exports.items()}
+            if "." in manifest["exports"]:
+                manifest["main"] = manifest["exports"]["."]["import"]
+                manifest["types"] = manifest["exports"]["."]["types"]
             fd, name = tempfile.mkstemp(prefix=".manifest-", dir=destination)
             try:
                 with os.fdopen(fd, "w") as file:

@@ -6,6 +6,7 @@ export interface Constraints {
   readonly max_length?: number;
 }
 export interface Field {
+  readonly public_name?: string;
   readonly name: string;
   readonly type: WireType;
   readonly description?: string;

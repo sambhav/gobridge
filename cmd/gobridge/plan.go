@@ -17,6 +17,7 @@ import (
 var supportedTargets = []string{"linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64", "windows-amd64", "windows-arm64"}
 
 type buildPlan struct {
+	Modules    []resolvedModule  `json:"modules"`
 	Project    project           `json:"project"`
 	Targets    []string          `json:"targets"`
 	Python     bool              `json:"python"`
@@ -30,6 +31,18 @@ func planBuild(ctx context.Context, p project, targets, output string, python, t
 	plan := buildPlan{Project: p, Python: python, TypeScript: typescript, Output: absolute(output), Tools: map[string]string{}}
 	if err := p.validate(); err != nil {
 		return plan, err
+	}
+	modules, err := p.resolveModules()
+	if err != nil {
+		return plan, err
+	}
+	plan.Modules = modules
+	if len(p.Modules) > 0 {
+		for _, module := range modules {
+			if _, err := planBuild(ctx, module.project(p), targets, output, python, typescript); err != nil {
+				return plan, fmt.Errorf("module %s: %w", module.Name, err)
+			}
+		}
 	}
 	if err := validateCustomization(p, python, typescript); err != nil {
 		return plan, err
@@ -138,6 +151,9 @@ func planBuild(ctx context.Context, p project, targets, output string, python, t
 			}
 		}
 		plan.Tools[check.name] = strings.TrimSpace(string(data))
+	}
+	if len(p.Modules) > 0 {
+		return plan, nil
 	}
 	if p.Command == "." || strings.HasPrefix(p.Command, "./") || filepath.IsAbs(p.Command) {
 		pkg, err := build.Default.ImportDir(p.Command, 0)

@@ -10,9 +10,9 @@ def settings(project):
     return json.loads(path.read_text()) if path.is_file() else {}
 
 
-def copy_package(project, language, destination):
+def copy_package(project, language, destination, source_override=None):
     config = settings(project)
-    source = config.get(language + "_package")
+    source = source_override if source_override is not None else config.get(language + "_package")
     if not source:
         return False
     root = Path(project).resolve()
@@ -33,12 +33,14 @@ def copy_package(project, language, destination):
         if path.is_dir(): target.mkdir(parents=True, exist_ok=True)
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                raise ValueError(f"package addition collides with another module: {relative}")
             shutil.copyfile(path, target)
     return True
 
 
 def python_requirements(project):
-    values = settings(project).get("python_requires", [])
+    values = settings(project).get("python", {}).get("requires", settings(project).get("python_requires", []))
     for value in values:
         if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9_,.-]+\])?(?:\s*(?:~=|==|!=|<=|>=|<|>)\s*[A-Za-z0-9.*+!-]+(?:\s*,\s*(?:~=|==|!=|<=|>=|<|>)\s*[A-Za-z0-9.*+!-]+)*)?", value):
             raise ValueError("python_requires supports package names, extras, and version comparisons")

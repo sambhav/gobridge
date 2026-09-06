@@ -262,3 +262,10 @@ timeouts, development reloads, and Cobra embedding. The runnable examples are
 [greeter](examples/greeter/greeter.go) and [Cobra](examples/cobra/README.md).
 For tests, benchmarks, and releasing gobridge itself, see
 [Contributing](CONTRIBUTING.md).
+
+### Multiple modules and naming
+
+Package several Go commands in one wheel or npm package, control import paths and
+per-language names, and expose Go functional options as Python constructor
+keywords or TypeScript options. See [modules, names, and functional options](docs/modules-and-names.md)
+and the [catalog example](examples/catalog/catalog.go).

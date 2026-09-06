@@ -128,7 +128,7 @@ func (r *Registry) cliConfigHelp(out io.Writer) {
 	}
 	fmt.Fprintln(out, "\nConstructor: --config OBJECT before the operation (omitted: {}).")
 	fmt.Fprintln(out, "JSON configuration fields:")
-	fields := describe(r.constructor.config).Fields
+	fields := r.constructor.schema().Fields
 	cliFields(out, fields, false)
 	cliNestedFields(out, fields)
 }
@@ -227,25 +227,35 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 		flags.SetOutput(stderr)
 		class := flags.String("class", "Service", "Python client class name")
 		binary := flags.String("binary", "service", "bundled executable name")
+		namesJSON := flags.String("names", "{}", "JSON class/operations/types/fields naming overrides")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
 		if flags.NArg() != 0 {
 			return fmt.Errorf("unexpected arguments")
 		}
-		return r.GeneratePython(out, *class, *binary)
+		var names Names
+		if err := json.Unmarshal([]byte(*namesJSON), &names); err != nil {
+			return err
+		}
+		return r.GeneratePython(out, *class, *binary, WithPython(names))
 	case "generate-typescript":
 		flags := flag.NewFlagSet("generate-typescript", flag.ContinueOnError)
 		flags.SetOutput(stderr)
 		class := flags.String("class", "Service", "TypeScript client class name")
 		binary := flags.String("binary", "service", "bundled executable name")
+		namesJSON := flags.String("names", "{}", "JSON class/operations/types/fields naming overrides")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
 		if flags.NArg() != 0 {
 			return fmt.Errorf("unexpected arguments")
 		}
-		return r.GenerateTypeScript(out, *class, *binary)
+		var names Names
+		if err := json.Unmarshal([]byte(*namesJSON), &names); err != nil {
+			return err
+		}
+		return r.GenerateTypeScript(out, *class, *binary, WithTypeScript(names))
 	}
 	op, ok := r.ops[args[0]]
 	if !ok {

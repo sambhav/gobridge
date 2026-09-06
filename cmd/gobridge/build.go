@@ -46,6 +46,17 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		}
 		return err
 	}
+	if len(p.Modules) > 0 {
+		conflict := ""
+		flags.Visit(func(f *flag.Flag) {
+			if f.Name == "dir" || f.Name == "command" || f.Name == "name" || f.Name == "class" {
+				conflict = f.Name
+			}
+		})
+		if conflict != "" {
+			return fmt.Errorf("use module configuration instead of --%s with modules", conflict)
+		}
+	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("unexpected build arguments")
 	}
@@ -68,9 +79,17 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 	if *check || *dryRun {
 		return json.NewEncoder(os.Stdout).Encode(plan)
 	}
-	if p.Source != "" {
-		if err := sourcegen.Generate(p.Source, "zz_gobridge.gen.go"); err != nil {
-			return err
+	modules, err := p.resolveModules()
+	if err != nil {
+		return err
+	}
+	generated := map[string]bool{}
+	for _, module := range modules {
+		if module.Source != "" && !generated[absolute(module.Source)] {
+			if err := sourcegen.Generate(module.Source, "zz_gobridge.gen.go"); err != nil {
+				return err
+			}
+			generated[absolute(module.Source)] = true
 		}
 	}
 	root, err := os.Getwd()
@@ -112,8 +131,16 @@ func runBuild(ctx context.Context, args []string, log io.Writer) error {
 		command.Stderr = log
 		return command.Run()
 	}
+	moduleData, err := json.Marshal(modules)
+	if err != nil {
+		return err
+	}
+	moduleFile := filepath.Join(stage, "modules.json")
+	if err := os.WriteFile(moduleFile, moduleData, 0644); err != nil {
+		return err
+	}
 	artifacts := filepath.Join(stage, "artifacts")
-	common := []string{"--project", root, "--go-package", p.Command, "--class", p.Class, "--binary", p.binaryName(), "--version", p.Version, "--repository", p.Repository, "--license", p.License, "--build-cache", filepath.Join(stage, "go-build")}
+	common := []string{"--modules", moduleFile, "--project", root, "--go-package", p.Command, "--class", p.Class, "--binary", p.binaryName(), "--version", p.Version, "--repository", p.Repository, "--license", p.License, "--build-cache", filepath.Join(stage, "go-build")}
 	targetArgs := []string{}
 	if *targets != "all" {
 		targetArgs = append(targetArgs, "--targets")

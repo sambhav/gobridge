@@ -235,3 +235,35 @@ func TestContextImportForms(t *testing.T) {
 		}
 	}
 }
+
+func TestFunctionalOptionAnnotations(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "library.go", `package example
+//gobridge:python ExampleClient
+type Example struct{}
+type Option func(*Example)
+//gobridge:constructor
+func New(options ...Option)*Example{return nil}
+//gobridge:option
+//gobridge:python request_timeout
+func WithTimeout(value int)Option{return nil}
+//gobridge:export
+//gobridge:ts getValue
+func (e *Example) Value()int{return 0}
+`)
+	if err := Generate(dir, "zz_gobridge.gen.go"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "zz_gobridge.gen.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`NewObjectOptions(`, `ConstructorOption("timeout", WithTimeout)`, `"ExampleConfig.timeout": "request_timeout"`, `Class: "ExampleClient"`, `"value": "getValue"`} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Errorf("missing %q: %s", want, data)
+		}
+	}
+	if err := Check(dir, "zz_gobridge.gen.go"); err != nil {
+		t.Fatal(err)
+	}
+}

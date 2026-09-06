@@ -65,6 +65,7 @@ jobs:
         with:
           node-version: '24'
       - run: python tools/test_workflows.py
+      - run: python tools/test_modules.py
       - run: python tools/test_prereleases.py
       - run: python tools/test_dev_watch.py
   npm-packages:

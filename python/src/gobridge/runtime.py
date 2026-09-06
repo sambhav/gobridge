@@ -119,7 +119,7 @@ def _json_default(value):
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         # JSON visits nested values itself. asdict would recursively copy the
         # entire graph before the encoder traverses that same graph again.
-        return {field.name: getattr(value, field.name) for field in dataclasses.fields(value)}
+        return {field.metadata.get("wire_name", field.name): getattr(value, field.name) for field in dataclasses.fields(value)}
     raise TypeError(f"Cannot encode {type(value).__name__}")
 
 
@@ -157,8 +157,9 @@ def _decoder(cls):
         elif origin in (types.UnionType, typing.Union):
             convert = compile_type(next(t for t in args if t is not type(None)))
         elif dataclasses.is_dataclass(cls):
-            fields = {k: compile_type(t) for k, t in _type_hints(cls).items()}
-            convert = lambda value: cls(**{k: fields[k](v) for k, v in value.items()})
+            hints = _type_hints(cls)
+            fields = {f.metadata.get("wire_name", f.name): (f.name, compile_type(hints[f.name])) for f in dataclasses.fields(cls)}
+            convert = lambda value: cls(**{fields[k][0]: fields[k][1](v) for k, v in value.items()})
         elif origin is list:
             child = compile_type(args[0])
             convert = list if child is identity else lambda value: [child(v) for v in value]

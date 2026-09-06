@@ -8,6 +8,7 @@ import (
 )
 
 type constructor struct {
+	names      map[reflect.Type]string
 	config     reflect.Type
 	initialize func(context.Context, json.RawMessage) error
 }
@@ -25,7 +26,9 @@ type Object struct {
 // func(Config) (*T, error), optionally with a leading context.Context. Config must
 // be a named wire struct and *T a pointer to a named struct. One constructor is
 // supported per registry; Bind can also register ordinary functions alongside it.
-func NewObject(r *Registry, fn any) (*Object, error) {
+func NewObject(r *Registry, fn any) (*Object, error) { return newObject(r, fn, nil) }
+
+func newObject(r *Registry, fn any, generated map[reflect.Type]string) (*Object, error) {
 	if r == nil {
 		return nil, fmt.Errorf("registry must not be nil")
 	}
@@ -45,10 +48,34 @@ func NewObject(r *Registry, fn any) (*Object, error) {
 		return nil, fmt.Errorf("constructor requires one named Config struct and optional leading context.Context")
 	}
 	config := t.In(offset)
-	if config.Kind() != reflect.Struct || config.Name() == "" {
+	if config.Kind() != reflect.Struct || (config.Name() == "" && generated == nil) {
 		return nil, fmt.Errorf("constructor Config must be a named struct")
 	}
-	if err := validateType(config, make(map[reflect.Type]bool)); err != nil {
+	var configErr error
+	if generated != nil {
+		var validateGenerated func(reflect.Type) error
+		validateGenerated = func(t reflect.Type) error {
+			if t.Kind() == reflect.Pointer {
+				return validateGenerated(t.Elem())
+			}
+			if _, ok := generated[t]; !ok {
+				return validateType(t, make(map[reflect.Type]bool))
+			}
+			if _, err := prepareStruct(t); err != nil {
+				return err
+			}
+			for j := 0; j < t.NumField(); j++ {
+				if err := validateGenerated(t.Field(j).Type); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		configErr = validateGenerated(config)
+	} else {
+		configErr = validateType(config, make(map[reflect.Type]bool))
+	}
+	if err := configErr; err != nil {
 		return nil, fmt.Errorf("constructor Config: %w", err)
 	}
 	for j := 0; j < config.NumField(); j++ {
@@ -68,7 +95,7 @@ func NewObject(r *Registry, fn any) (*Object, error) {
 		return nil, fmt.Errorf("constructor result must be a pointer to a named struct")
 	}
 	object := &Object{registry: r, receiverType: receiverType}
-	r.constructor = &constructor{config: config, initialize: func(ctx context.Context, raw json.RawMessage) error {
+	r.constructor = &constructor{config: config, names: generated, initialize: func(ctx context.Context, raw json.RawMessage) error {
 		v, err := decodeInput(raw, config)
 		if err != nil {
 			return Failure("invalid_argument", err.Error())
@@ -152,4 +179,24 @@ func (r *Registry) Initialize(ctx context.Context, config json.RawMessage) (err 
 	}
 	r.initialized = true
 	return nil
+}
+
+// schema gives reflection-created constructor groups stable public model names.
+func (c *constructor) schema() Type {
+	result := describe(c.config)
+	var name func(*Type, reflect.Type)
+	name = func(schema *Type, t reflect.Type) {
+		if schema.Elem != nil {
+			name(schema.Elem, t.Elem())
+			return
+		}
+		if model, ok := c.names[t]; ok {
+			schema.Name = model
+		}
+		for i := range schema.Fields {
+			name(&schema.Fields[i].Type, t.Field(i).Type)
+		}
+	}
+	name(&result, c.config)
+	return result
 }
