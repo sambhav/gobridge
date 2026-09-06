@@ -7,17 +7,39 @@ import json
 from pathlib import Path
 import shutil
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
 
 from build_wheels import write_wheel
 from check_versions import check, ROOT
-from packaging_common import validate_static_linux
+from packaging_common import application_version, validate_static_linux
 from release import digest, require_match, verified_files, TARGETS
 
 
 class PackagingTests(unittest.TestCase):
+    def test_application_versions(self):
+        cases = json.loads((ROOT / "testdata/package_versions.json").read_text())
+        for version, expected in cases["valid"].items():
+            with self.subTest(version=version):
+                self.assertEqual(application_version(version), expected)
+        for version in cases["invalid"]:
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                application_version(version)
+
+    def test_invalid_versions_fail_before_builder_output(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "dist"
+            for script in ("build_wheels.py", "build_npm.py"):
+                result = subprocess.run([sys.executable, str(ROOT / "tools" / script),
+                                         "--version", "1.2.3-rc.01", "--output", str(output)],
+                                        capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("version must be", result.stderr)
+                self.assertFalse(output.exists())
+
     def test_wheel_record_tags_binary_mode_and_reproducibility(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

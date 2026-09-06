@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 
 from package_customization import copy_package, settings
-from packaging_common import build_go_binary
+from packaging_common import application_version, build_go_binary
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "typescript"
@@ -75,15 +75,15 @@ def main():
         parser.error("--package must be a lowercase npm package name")
     if args.package == "gobridge-runtime":
         parser.error("--package must differ from gobridge-runtime")
+    runtime_manifest = json.loads((RUNTIME / "package.json").read_text())
+    version = args.version if args.version is not None else runtime_manifest["version"]
+    application_version(version)  # Same input policy as wheels, before compilation.
     compiler = RUNTIME / "node_modules" / "typescript" / "bin" / "tsc"
     if not compiler.is_file():
         parser.error("install compiler dependencies first: npm ci --ignore-scripts --prefix typescript")
     output = args.output.resolve()
     if not args.dev_output:
         output.mkdir(parents=True, exist_ok=True)
-    runtime_manifest = json.loads((RUNTIME / "package.json").read_text())
-    runtime_version = runtime_manifest["version"]
-    version = args.version or runtime_version
     with tempfile.TemporaryDirectory(prefix="gobridge-npm-") as temp:
         temporary = Path(temp)
         host = temporary / (args.binary + (".exe" if os.name == "nt" else ""))

@@ -69,8 +69,9 @@ func planBuild(ctx context.Context, p project, targets, output string, python, t
 		"darwin-amd64": "macosx_12_0_x86_64", "darwin-arm64": "macosx_12_0_arm64", "windows-amd64": "win_amd64", "windows-arm64": "win_arm64",
 	}
 	if python {
+		pythonVersion, _ := pythonPackageVersion(p.Version) // Already validated above.
 		for _, target := range plan.Targets {
-			name := regexp.MustCompile(`[-_.]+`).ReplaceAllString(p.PythonDistribution, "_") + "-" + p.Version + "-py3-none-" + wheelTags[target] + ".whl"
+			name := regexp.MustCompile(`[-_.]+`).ReplaceAllString(p.PythonDistribution, "_") + "-" + pythonVersion + "-py3-none-" + wheelTags[target] + ".whl"
 			plan.Artifacts = append(plan.Artifacts, name)
 		}
 	}

@@ -19,7 +19,7 @@ import subprocess
 import tempfile
 
 from package_customization import copy_package, python_requirements
-from packaging_common import build_go_binary, python_version, validate_static_linux
+from packaging_common import application_version, build_go_binary, python_version, validate_static_linux
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT
@@ -39,8 +39,7 @@ def run(*args, **kwargs):
 
 def write_wheel(stage, package, distribution, version, tag, output, repository, license_id, project):
     """Write a standard wheel using only Python's standard library."""
-    if not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version):
-        raise ValueError("version must be a stable X.Y.Z version")
+    version = application_version(version)
     for value in (repository, license_id):
         if "\n" in value or "\r" in value:
             raise ValueError("package metadata must not contain newlines")
@@ -122,7 +121,8 @@ def main():
     if re.sub(r"[-_.]+", "-", args.distribution).lower() == "gobridge-runtime" or parts[0] == "gobridge":
         parser.error("application package must not shadow the gobridge runtime")
     runtime_version = python_version(ROOT)
-    version = args.version or runtime_version
+    version = args.version if args.version is not None else runtime_version
+    application_version(version)  # Fail before compiling or creating output.
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="gobridge-wheels-") as tmp:

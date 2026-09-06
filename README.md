@@ -172,6 +172,8 @@ console.log(await greet({ name: "World" }));
 All six Linux/macOS/Windows × amd64/arm64 targets build by default with
 `CGO_ENABLED=0`. Use `--targets linux-amd64,darwin-arm64` for fewer targets,
 `--output` for another directory, and `--version 0.2.0` to override the manifest.
+Prereleases work too: `--version 0.2.0-rc.1` produces Python `0.2.0rc1` and
+npm `0.2.0-rc.1`. See [package versioning](docs/packaging.md#prereleases).
 Libraries requiring cgo need their own target build recipe.
 
 Publish `dist/*.whl` to PyPI with Twine or `dist/npm/*.tgz` with `npm publish`.
