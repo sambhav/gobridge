@@ -38,7 +38,7 @@ type devOptions struct {
 }
 
 func runDev(ctx context.Context, args []string, log io.Writer) error {
-	p, err := loadProject()
+	p, err := loadCommandProject(args)
 	if err != nil {
 		return err
 	}
@@ -46,10 +46,6 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 	flags := flag.NewFlagSet("dev", flag.ContinueOnError)
 	flags.SetOutput(log)
 	moduleName := flags.String("module", "", "module name from gobridge.json")
-	flags.StringVar(&options.Source, "dir", p.Source, "annotated library directory; omit for manual registration")
-	flags.StringVar(&options.Command, "command", p.Command, "Go executable package")
-	flags.StringVar(&options.Name, "name", p.Name, "Python import path (dots allowed; binary uses underscores)")
-	flags.StringVar(&options.Class, "class", p.Class, "generated client class")
 	flags.StringVar(&options.output, "python", "", "generated Python package directory (default build/<package/path>)")
 	flags.BoolVar(&options.typescript, "typescript", false, "generate a local npm package and restart a Node application")
 	flags.DurationVar(&options.interval, "interval", 500*time.Millisecond, "source polling interval")
@@ -65,6 +61,9 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 		if err != nil {
 			return err
 		}
+		if *moduleName == "" && len(modules) == 1 {
+			*moduleName = modules[0].Name
+		}
 		for _, module := range modules {
 			if module.Name == *moduleName {
 				m := module
@@ -76,15 +75,7 @@ func runDev(ctx context.Context, args []string, log io.Writer) error {
 		if options.selectedModule == nil {
 			return fmt.Errorf("select a configured module with --module NAME")
 		}
-		conflict := ""
-		flags.Visit(func(f *flag.Flag) {
-			if f.Name == "dir" || f.Name == "command" || f.Name == "name" || f.Name == "class" {
-				conflict = f.Name
-			}
-		})
-		if conflict != "" {
-			return fmt.Errorf("use module configuration instead of --%s with --module", conflict)
-		}
+
 	}
 	options.app = flags.Args()
 	if err := options.validate(); err != nil {

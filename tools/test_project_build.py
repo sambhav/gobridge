@@ -35,7 +35,7 @@ def main():
         command = project / "cmd" / "greeter"
         command.mkdir(parents=True)
         (command / "main.go").write_text(command_source)
-        (project / "gobridge.json").write_text(json.dumps({"name": "greeter", "source": ".", "command": "./cmd/greeter"}))
+        (project / "gobridge.json").write_text(json.dumps({"modules":[{"name": "greeter", "source": ".", "command": "./cmd/greeter", "typescript":{"export":"."}}]}))
         goos = subprocess.check_output(["go", "env", "GOOS"], text=True).strip()
         goarch = subprocess.check_output(["go", "env", "GOARCH"], text=True).strip()
         subprocess.run([str(cli), "build", "--python", "--typescript", "--targets", goos + "-" + goarch,
@@ -78,8 +78,7 @@ def main():
         assert len(list((project / "app-only").glob("*.whl"))) == 1
         # Separate distributions share native namespace parents, including after uninstall.
         for leaf in ("greeter", "farewell"):
-            manifest = {"name": "acme.tools." + leaf, "source": ".", "command": "./cmd/greeter",
-                        "npm_package": "@acme/" + leaf}
+            manifest = {"typescript":{"package":"@acme/"+leaf}, "modules":[{"name": "acme.tools." + leaf, "source": ".", "command": "./cmd/greeter", "typescript":{"export":"."}}]}
             (project / "gobridge.json").write_text(json.dumps(manifest))
             languages = ["--python", "--typescript"] if leaf == "greeter" else ["--python"]
             subprocess.run([str(cli), "build", *languages, "--targets", goos + "-" + goarch,

@@ -17,10 +17,10 @@ func runInit(args []string, log io.Writer) error {
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
 	flags.SetOutput(log)
 	dir := flags.String("dir", ".", "project directory")
-	module := flags.String("module", "", "Go module import path (required for a new module)")
+	modulePath := flags.String("module", "", "Go module import path (required for a new module)")
 	name := flags.String("name", "greeter", "Python import path, including optional namespaces")
 	npm := flags.String("npm-package", "", "npm package, including optional @scope")
-	dry := flags.Bool("dry-run", false, "print planned files without writing")
+	dry := flags.Bool("check", false, "print planned files without writing")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -49,25 +49,25 @@ func runInit(args []string, log io.Writer) error {
 			return fmt.Errorf("cannot read module path from go.mod")
 		}
 		found := strings.Trim(string(match[1]), `"`)
-		if *module != "" && *module != found {
+		if *modulePath != "" && *modulePath != found {
 			return fmt.Errorf("--module disagrees with existing go.mod")
 		}
-		*module = found
+		*modulePath = found
 	} else if os.IsNotExist(err) {
-		if *module == "" {
+		if *modulePath == "" {
 			return fmt.Errorf("--module is required for a new Go module")
 		}
-		files["go.mod"] = fmt.Sprintf("module %s\n\ngo 1.23.0\n\nrequire github.com/sambhav/gobridge v%s\n", *module, scaffoldVersion())
+		files["go.mod"] = fmt.Sprintf("module %s\n\ngo 1.23.0\n\nrequire github.com/sambhav/gobridge v%s\n", *modulePath, scaffoldVersion())
 	} else {
 		return err
 	}
-	if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~/-]*$`).MatchString(*module) || strings.Contains(*module, "..") {
-		return fmt.Errorf("invalid Go module path %q", *module)
+	if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~/-]*$`).MatchString(*modulePath) || strings.Contains(*modulePath, "..") {
+		return fmt.Errorf("invalid Go module path %q", *modulePath)
 	}
-	data, _ := json.MarshalIndent(p, "", "  ")
+	data, _ := json.MarshalIndent(p.manifest(), "", "  ")
 	files["gobridge.json"] = string(data) + "\n"
 	files["bridge/greeter.go"] = "package bridge\n\n// Greet returns a friendly greeting.\n//gobridge:export\nfunc Greet(name string) string { return \"Hello, \" + name + \"!\" }\n"
-	main, err := format.Source([]byte(fmt.Sprintf("package main\nimport (\"log\"; bridge %q)\nfunc main(){r,err:=bridge.NewGobridge();if err!=nil{log.Fatal(err)};r.Main()}\n", *module+"/bridge")))
+	main, err := format.Source([]byte(fmt.Sprintf("package main\nimport (\"log\"; bridge %q)\nfunc main(){r,err:=bridge.NewGobridge();if err!=nil{log.Fatal(err)};r.Main()}\n", *modulePath+"/bridge")))
 	if err != nil {
 		return err
 	}

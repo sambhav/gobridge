@@ -351,8 +351,8 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 		}
 		fmt.Fprintf(&out, "},%s...)...)\n", optionsName)
 	}
-	if constructor != "" && functional {
-		fmt.Fprintf(&out, "%s, %s := %s.NewObjectOptions(%s, %s", object, errName, bridge, registry, constructor)
+	if constructor != "" {
+		fmt.Fprintf(&out, "%s, %s := %s.NewObject(%s, %s", object, errName, bridge, registry, constructor)
 		// Source order is stable: sorted files, then declaration order.
 		for _, option := range optionFactories {
 			fmt.Fprintf(&out, ", %s.ConstructorOption(%q, %s", bridge, option.name, option.function)
@@ -364,8 +364,7 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 			fmt.Fprint(&out, ")")
 		}
 		fmt.Fprintf(&out, ")\nif %s != nil {return nil,%s}\n", errName, errName)
-	} else if constructor != "" {
-		fmt.Fprintf(&out, "%s, %s := %s.NewObject(%s, %s)\nif %s != nil { return nil, %s }\n", object, errName, bridge, registry, constructor, errName, errName)
+
 	}
 	for _, op := range operations {
 		call := fmt.Sprintf("%s.Bind(%s, %q, %s", bridge, registry, op.name, op.function)

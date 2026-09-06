@@ -7,7 +7,7 @@ import _gobridge "github.com/sambhav/gobridge"
 // NewGobridge registers annotated operations without running their constructors.
 func NewGobridge(_options ..._gobridge.Option) (*_gobridge.Registry, error) {
 	_registry := _gobridge.New(append([]_gobridge.Option{_gobridge.WithPython(_gobridge.Names{Class: "CatalogClient", Types: map[string]string{"Status": "CatalogStatus"}, Operations: map[string]string{"status": "get_status"}, Fields: map[string]string{"CatalogConfig.endpoint": "base_url"}}), _gobridge.WithTypeScript(_gobridge.Names{Class: "CatalogApi", Types: map[string]string{"Status": "CatalogInfo"}, Operations: map[string]string{"status": "getStatus"}, Fields: map[string]string{"CatalogConfig.endpoint": "baseURL"}})}, _options...)...)
-	_object, _err := _gobridge.NewObjectOptions(_registry, New, _gobridge.ConstructorOption("endpoint", WithEndpoint), _gobridge.ConstructorOption("retries", WithRetries), _gobridge.ConstructorOption("retry", WithRetry, "attempts", "delay_ms"))
+	_object, _err := _gobridge.NewObject(_registry, New, _gobridge.ConstructorOption("endpoint", WithEndpoint), _gobridge.ConstructorOption("retries", WithRetries), _gobridge.ConstructorOption("retry", WithRetry, "attempts", "delay_ms"))
 	if _err != nil {
 		return nil, _err
 	}

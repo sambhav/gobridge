@@ -116,7 +116,7 @@ def main():
             bindings = subprocess.check_output([str(host), "generate-typescript", "--class", config["class"],
                 "--binary", module["binary"], "--names", json.dumps(config.get("rename", {}))])
             shutil.copytree(RUNTIME / "src", directory / "_gobridge")
-            module_custom = copy_package(project, "typescript", directory, config.get("package", "") if args.modules else None)
+            module_custom = copy_package(project, config.get("package", ""), directory)
             custom = custom or module_custom
             generated = "generated.ts" if module_custom else "index.ts"
             (directory / generated).write_bytes(bindings.replace(b'from "gobridge-runtime"', b'from "./_gobridge/index.js"'))
@@ -138,7 +138,7 @@ def main():
         }
         if "." not in exports:
             manifest.pop("main"); manifest.pop("types")
-        dependencies = settings(project).get("typescript", {}).get("dependencies", settings(project).get("npm_dependencies", {}))
+        dependencies = settings(project).get("typescript", {}).get("dependencies", {})
         if dependencies:
             manifest["dependencies"] = dependencies
         if custom or args.modules:

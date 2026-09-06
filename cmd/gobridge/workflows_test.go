@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,11 +36,11 @@ func TestInitDryRunAndOwnership(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "project")
 	var out bytes.Buffer
 	args := []string{"--dir", dir, "--module", "example.test/project", "--name", "acme.tools.greeter", "--npm-package", "@acme/greeter"}
-	if err := runInit(append(args, "--dry-run"), &out); err != nil {
+	if err := runInit(append(args, "--check"), &out); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatal("dry-run wrote files")
+		t.Fatal("check wrote files")
 	}
 	if err := runInit(args, &out); err != nil {
 		t.Fatal(err)
@@ -70,7 +71,7 @@ func TestInitDryRunAndOwnership(t *testing.T) {
 func TestBuildValidationBeforeGeneration(t *testing.T) {
 	dir := t.TempDir()
 	inDirectory(t, dir)
-	writeTestFile(t, "gobridge.json", `{"name":"acme.greeter","source":".","command":"."}`)
+	writeTestFile(t, "gobridge.json", `{"modules":[{"name":"acme.greeter","source":".","command":"."}]}`)
 	writeTestFile(t, "main.go", "package main\n//gobridge:export\nfunc Greet()string{return \"hello\"}\nfunc main(){}\n")
 	for _, args := range [][]string{{"--targets", "bogus"}, {"--version", "01.2.3"}, {"--version", "1.2.3-rc.01"}, {"--version", "1.2.3+build"}, {"--distribution", "bad/name"}, {"--typescript", "--npm-package", "../bad"}, {"--targets", "linux-amd64,linux-amd64"}} {
 		if err := runBuild(context.Background(), args, &bytes.Buffer{}); err == nil {
@@ -183,5 +184,28 @@ func TestNullProjectManifest(t *testing.T) {
 	writeTestFile(t, "gobridge.json", "null")
 	if _, err := loadProject(); err == nil {
 		t.Fatal("accepted null project manifest")
+	}
+}
+
+func TestCanonicalManifestAndHelp(t *testing.T) {
+	inDirectory(t, t.TempDir())
+	for _, command := range []func(context.Context, []string, io.Writer) error{runBuild, runDev} {
+		if err := command(context.Background(), []string{"--help"}, &bytes.Buffer{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, config := range []string{`{"name":"old","command":"."}`, `{"modules":[]}`, `{"modules":[{"name":"x","command":"."}],"python_distribution":"old"}`} {
+		writeTestFile(t, "gobridge.json", config)
+		if _, err := loadProject(); err == nil {
+			t.Fatalf("accepted removed manifest shape: %s", config)
+		}
+	}
+	writeTestFile(t, "gobridge.json", `{"version":"1.2.0","python":{"distribution":"example-sdk"},"modules":[{"name":"api","command":".","python":{"module":"example.api"}}]}`)
+	p, err := loadProject()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "example.api" || p.PythonDistribution != "example-sdk" || len(p.Modules) != 1 {
+		t.Fatalf("bad normalized manifest: %+v", p)
 	}
 }

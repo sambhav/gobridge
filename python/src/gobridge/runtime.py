@@ -580,10 +580,6 @@ def require_sync() -> None:
     raise RuntimeError("synchronous bridge calls cannot run inside an event loop; use the async API with await")
 
 
-class AsyncClient(Client):
-    """Base for generated async clients; supports async context management."""
-
-
 def _shutdown():
     for client in list(_clients):
         client.close()

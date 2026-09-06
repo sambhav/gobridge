@@ -1,7 +1,7 @@
 # Development and internals
 
-The [README](README.md) covers installation and the quick start; the
-[API guide](docs/usage.md) covers advanced usage. Keep implementation notes here.
+The [README](README.md) is the complete user guide. This document covers
+maintainer workflows and implementation notes.
 
 ## Verify a change
 

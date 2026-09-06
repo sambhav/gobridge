@@ -43,10 +43,7 @@ type resolvedModule struct {
 }
 
 func (p project) resolveModules() ([]resolvedModule, error) {
-	modules := p.Modules
-	if len(modules) == 0 {
-		modules = []module{{Name: p.Name, Source: p.Source, Command: p.Command, Python: moduleTarget{Class: p.Class, Package: p.PythonPackage}, TypeScript: moduleTarget{Class: p.Class, Package: p.TypeScriptPackage, Export: "."}}}
-	}
+	modules := p.moduleSpecs()
 	result := make([]resolvedModule, 0, len(modules))
 	seen := map[string]bool{}
 	for _, m := range modules {
@@ -107,8 +104,6 @@ func (p project) resolveModules() ([]resolvedModule, error) {
 }
 func (m resolvedModule) project(p project) project {
 	p.Modules = nil
-	p.Python = nil
-	p.TypeScript = nil
 	p.Name = m.Python.Module
 	p.Source = m.Source
 	p.Command = m.Command
@@ -116,4 +111,12 @@ func (m resolvedModule) project(p project) project {
 	p.PythonPackage = m.Python.Package
 	p.TypeScriptPackage = m.TypeScript.Package
 	return p
+}
+
+func (p project) moduleSpecs() []module {
+	modules := p.Modules
+	if len(modules) == 0 {
+		modules = []module{{Name: p.Name, Source: p.Source, Command: p.Command, Python: moduleTarget{Class: p.Class, Package: p.PythonPackage}, TypeScript: moduleTarget{Class: p.Class, Package: p.TypeScriptPackage, Export: "."}}}
+	}
+	return modules
 }

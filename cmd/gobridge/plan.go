@@ -18,7 +18,7 @@ var supportedTargets = []string{"linux-amd64", "linux-arm64", "darwin-amd64", "d
 
 type buildPlan struct {
 	Modules    []resolvedModule  `json:"modules"`
-	Project    project           `json:"project"`
+	Project    projectFile       `json:"project"`
 	Targets    []string          `json:"targets"`
 	Python     bool              `json:"python"`
 	TypeScript bool              `json:"typescript"`
@@ -28,7 +28,7 @@ type buildPlan struct {
 }
 
 func planBuild(ctx context.Context, p project, targets, output string, python, typescript bool) (buildPlan, error) {
-	plan := buildPlan{Project: p, Python: python, TypeScript: typescript, Output: absolute(output), Tools: map[string]string{}}
+	plan := buildPlan{Project: p.manifest(), Python: python, TypeScript: typescript, Output: absolute(output), Tools: map[string]string{}}
 	if err := p.validate(); err != nil {
 		return plan, err
 	}

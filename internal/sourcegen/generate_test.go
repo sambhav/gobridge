@@ -258,7 +258,7 @@ func (e *Example) Value()int{return 0}
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`NewObjectOptions(`, `ConstructorOption("timeout", WithTimeout)`, `"ExampleConfig.timeout": "request_timeout"`, `Class: "ExampleClient"`, `"value": "getValue"`} {
+	for _, want := range []string{`NewObject(`, `ConstructorOption("timeout", WithTimeout)`, `"ExampleConfig.timeout": "request_timeout"`, `Class: "ExampleClient"`, `"value": "getValue"`} {
 		if !bytes.Contains(data, []byte(want)) {
 			t.Errorf("missing %q: %s", want, data)
 		}

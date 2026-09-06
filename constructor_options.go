@@ -23,11 +23,11 @@ type OptionFactory struct {
 	params  []string
 }
 
-// NewObjectOptions adapts func(...Option) *T (or (*T, error)), optionally with
+// newFunctionalObject adapts func(...Option) *T (or (*T, error)), optionally with
 // context.Context, to typed Python keyword arguments and TypeScript options.
 // Factories apply in declaration order. Multi-argument factories use a grouped
 // options object, with fields named by ConstructorOption parameter names.
-func NewObjectOptions(r *Registry, fn any, options ...OptionFactory) (*Object, error) {
+func newFunctionalObject(r *Registry, fn any, options ...OptionFactory) (*Object, error) {
 	f := reflect.ValueOf(fn)
 	if !f.IsValid() || f.Kind() != reflect.Func || f.IsNil() || !f.Type().IsVariadic() {
 		return nil, fmt.Errorf("functional-options constructor must be a non-nil variadic function")

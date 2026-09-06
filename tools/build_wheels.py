@@ -158,7 +158,7 @@ def main():
                 shutil.copytree(ROOT / "python/src/gobridge", private, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
                 shutil.copyfile(ROOT / "LICENSE", private / "LICENSE")
                 source = bindings.decode().replace("\nfrom gobridge", "\nfrom ._gobridge")
-                if copy_package(PROJECT, "python", package, module["python"].get("package", "") if args.modules else None):
+                if copy_package(PROJECT, module["python"].get("package", ""), package):
                     (package / "_bindings.py").write_text(source, encoding="utf-8")
                     if not (package / "__init__.py").exists():
                         (package / "__init__.py").write_text("from ._bindings import *\n")

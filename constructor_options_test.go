@@ -23,7 +23,7 @@ func TestFunctionalConstructorDefaultsZeroAndErrors(t *testing.T) {
 		t.Run(test.json, func(t *testing.T) {
 			called := false
 			r := New()
-			o, err := NewObjectOptions(r, func(ctx context.Context, options ...counterOption) *optionCounter {
+			o, err := NewObject(r, func(ctx context.Context, options ...counterOption) *optionCounter {
 				called = true
 				if ctx.Err() != nil {
 					t.Fatal(ctx.Err())
@@ -73,7 +73,7 @@ func TestFunctionalConstructorRejectsInvalidFactories(t *testing.T) {
 	ctor := func(...counterOption) *optionCounter { return &optionCounter{} }
 	for _, factory := range []OptionFactory{ConstructorOption("initial", nil), ConstructorOption("initial", func(int) int { return 1 }), ConstructorOption("initial", func(int, int) counterOption { return nil }), ConstructorOption("command", func(int) counterOption { return nil })} {
 		r := New()
-		if _, err := NewObjectOptions(r, ctor, factory); err == nil {
+		if _, err := NewObject(r, ctor, factory); err == nil {
 			t.Fatal("accepted invalid factory")
 		}
 		if r.constructor != nil {
@@ -97,7 +97,7 @@ func TestGroupedConstructorOptions(t *testing.T) {
 		t.Run(test.input, func(t *testing.T) {
 			r := New()
 			calls := 0
-			o, err := NewObjectOptions(r, func(options ...counterOption) *optionCounter {
+			o, err := NewObject(r, func(options ...counterOption) *optionCounter {
 				c := &optionCounter{7}
 				for _, option := range options {
 					option(c)
@@ -155,7 +155,7 @@ func TestGroupedConstructorOptions(t *testing.T) {
 func TestGroupedConstructorParameterNames(t *testing.T) {
 	for _, names := range [][]string{nil, {"only"}, {"same", "same"}, {"self", "delay"}, {"attempts", "bad-name"}} {
 		r := New()
-		_, err := NewObjectOptions(r, func(...counterOption) *optionCounter { return nil }, ConstructorOption("retry", func(int, int) counterOption { return nil }, names...))
+		_, err := NewObject(r, func(...counterOption) *optionCounter { return nil }, ConstructorOption("retry", func(int, int) counterOption { return nil }, names...))
 		if err == nil {
 			t.Fatalf("accepted names %v", names)
 		}

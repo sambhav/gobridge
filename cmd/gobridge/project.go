@@ -11,63 +11,67 @@ import (
 )
 
 type project struct {
-	Modules            []module                `json:"modules,omitempty"`
-	Python             *pythonDistribution     `json:"python,omitempty"`
-	TypeScript         *typescriptDistribution `json:"typescript,omitempty"`
-	PythonPackage      string                  `json:"python_package,omitempty"`
-	TypeScriptPackage  string                  `json:"typescript_package,omitempty"`
-	PythonRequires     []string                `json:"python_requires,omitempty"`
-	NPMDependencies    map[string]string       `json:"npm_dependencies,omitempty"`
-	Name               string                  `json:"name"`
-	Class              string                  `json:"class"`
-	Command            string                  `json:"command"`
-	Source             string                  `json:"source"`
-	Version            string                  `json:"version"`
-	PythonDistribution string                  `json:"python_distribution"`
-	NPMPackage         string                  `json:"npm_package"`
-	Repository         string                  `json:"repository"`
-	License            string                  `json:"license"`
+	Modules            []module
+	PythonPackage      string
+	TypeScriptPackage  string
+	PythonRequires     []string
+	NPMDependencies    map[string]string
+	Name               string
+	Class              string
+	Command            string
+	Source             string
+	Version            string
+	PythonDistribution string
+	NPMPackage         string
+	Repository         string
+	License            string
+}
+
+// projectFile is the only accepted gobridge.json format. Module settings live
+// in modules even when the distribution contains just one module.
+type projectFile struct {
+	Version    string                 `json:"version"`
+	Repository string                 `json:"repository,omitempty"`
+	License    string                 `json:"license,omitempty"`
+	Python     pythonDistribution     `json:"python"`
+	TypeScript typescriptDistribution `json:"typescript"`
+	Modules    []module               `json:"modules"`
 }
 
 func loadProject() (project, error) {
 	p := project{Name: "service", Command: ".", Version: "0.1.0"}
 	file, err := os.Open("gobridge.json")
-	if os.IsNotExist(err) {
-		return p, nil
-	}
 	if err != nil {
-		return p, err
+		return p, fmt.Errorf("open gobridge.json (run gobridge init to create a project): %w", err)
 	}
 	defer file.Close()
+	config := &projectFile{Version: "0.1.0"}
 	dec := json.NewDecoder(file)
 	dec.DisallowUnknownFields()
-	decoded := &p
-	if err := dec.Decode(&decoded); err != nil {
-		return p, fmt.Errorf("gobridge.json: %w", err)
+	if err := dec.Decode(&config); err != nil {
+		return p, fmt.Errorf("gobridge.json: %w; use the modules-based format in README.md", err)
 	}
-	if decoded == nil {
-		return p, fmt.Errorf("gobridge.json: expected a JSON object, got null")
+	if config == nil {
+		return p, fmt.Errorf("gobridge.json: expected an object")
 	}
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
 		return p, fmt.Errorf("gobridge.json: expected one JSON object")
 	}
-	if p.Python != nil {
-		if p.PythonDistribution != "" || p.PythonRequires != nil {
-			return p, fmt.Errorf("use python or legacy python_distribution/python_requires, not both")
-		}
-		p.PythonDistribution = p.Python.Distribution
-		p.PythonRequires = p.Python.Requires
+	if len(config.Modules) == 0 {
+		return p, fmt.Errorf("gobridge.json: at least one module is required")
 	}
-	if p.TypeScript != nil {
-		if p.NPMPackage != "" || p.NPMDependencies != nil {
-			return p, fmt.Errorf("use typescript or legacy npm_package/npm_dependencies, not both")
-		}
-		p.NPMPackage = p.TypeScript.Package
-		p.NPMDependencies = p.TypeScript.Dependencies
-	}
-	if len(p.Modules) > 0 && (p.Source != "" || p.Class != "" || p.PythonPackage != "" || p.TypeScriptPackage != "" || p.Command != ".") {
-		return p, fmt.Errorf("put source, command, class and package additions inside modules")
+	p.Modules = config.Modules
+	p.Version = config.Version
+	p.Repository = config.Repository
+	p.License = config.License
+	p.PythonDistribution = config.Python.Distribution
+	p.PythonRequires = config.Python.Requires
+	p.NPMPackage = config.TypeScript.Package
+	p.NPMDependencies = config.TypeScript.Dependencies
+	p.Name = p.Modules[0].Python.Module
+	if p.Name == "" {
+		p.Name = p.Modules[0].Name
 	}
 	return p, nil
 }
@@ -97,7 +101,7 @@ func (p *project) validate() error {
 	if !regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`).MatchString(p.Class) {
 		return fmt.Errorf("class must be a capitalized identifier")
 	}
-	for _, reserved := range strings.Fields("Client AsyncClient RuntimeOptions DefaultControl Promise Record Uint8Array") {
+	for _, reserved := range strings.Fields("Client RuntimeOptions DefaultControl Promise Record Uint8Array") {
 		if p.Class == reserved {
 			return fmt.Errorf("class %q conflicts with generated symbols", p.Class)
 		}
@@ -118,4 +122,18 @@ func (p project) packagePath() string { return filepath.Join(strings.Split(p.Nam
 func (p project) binaryName() string  { return strings.ReplaceAll(p.Name, ".", "_") }
 func (p project) distributionName() string {
 	return strings.NewReplacer(".", "-", "_", "-").Replace(p.Name)
+}
+
+// manifest presents the same schema for scaffolding and inspected build plans.
+func (p project) manifest() projectFile {
+	return projectFile{Version: p.Version, Repository: p.Repository, License: p.License,
+		Python:     pythonDistribution{Distribution: p.PythonDistribution, Requires: p.PythonRequires},
+		TypeScript: typescriptDistribution{Package: p.NPMPackage, Dependencies: p.NPMDependencies}, Modules: p.moduleSpecs()}
+}
+
+func loadCommandProject(args []string) (project, error) {
+	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+		return project{}, nil
+	}
+	return loadProject()
 }

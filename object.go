@@ -26,7 +26,18 @@ type Object struct {
 // func(Config) (*T, error), optionally with a leading context.Context. Config must
 // be a named wire struct and *T a pointer to a named struct. One constructor is
 // supported per registry; Bind can also register ordinary functions alongside it.
-func NewObject(r *Registry, fn any) (*Object, error) { return newObject(r, fn, nil) }
+// A variadic func(...Option) constructor uses ConstructorOption factories to
+// expose its options; multi-parameter factories become typed keyword groups.
+func NewObject(r *Registry, fn any, options ...OptionFactory) (*Object, error) {
+	f := reflect.ValueOf(fn)
+	if f.IsValid() && f.Kind() == reflect.Func && f.Type().IsVariadic() {
+		return newFunctionalObject(r, fn, options...)
+	}
+	if len(options) != 0 {
+		return nil, fmt.Errorf("option factories require a variadic constructor")
+	}
+	return newObject(r, fn, nil)
+}
 
 func newObject(r *Registry, fn any, generated map[reflect.Type]string) (*Object, error) {
 	if r == nil {

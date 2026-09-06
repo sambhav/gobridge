@@ -20,6 +20,6 @@ with SyncCatalogClient(base_url="https://example.test", retries=0) as client:
     print(client.get_status())
 ```
 
-See [modules and naming](../../docs/modules-and-names.md) for per-language rename
+See [modules and naming](../../README.md#configuration) for per-language rename
 maps, annotations, and development commands. Outputs are local; nothing is
 published by the build command.
