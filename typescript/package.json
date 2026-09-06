@@ -1,6 +1,6 @@
 {
   "name": "gobridge-runtime",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "description": "Dependency-free Node runtime for typed Go library bindings",
   "type": "module",
   "main": "./dist/index.js",

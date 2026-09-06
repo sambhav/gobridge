@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/sambhav/gobridge/compare/v1.2.0...v2.0.0) (2026-09-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* multi-module bindings and consolidated configuration APIs ([#24](https://github.com/sambhav/gobridge/issues/24))
+
+### Features
+
+* multi-module bindings and consolidated configuration APIs ([#24](https://github.com/sambhav/gobridge/issues/24)) ([cbb5600](https://github.com/sambhav/gobridge/commit/cbb5600c3e73caade818c82a2d75ed8a6917bd29))
+
 ## [1.2.0](https://github.com/sambhav/gobridge/compare/v1.1.0...v1.2.0) (2026-09-06)
 
 
