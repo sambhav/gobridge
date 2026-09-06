@@ -194,7 +194,7 @@ func TestCanonicalManifestAndHelp(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, config := range []string{`{"name":"old","command":"."}`, `{"modules":[]}`, `{"modules":[{"name":"x","command":"."}],"python_distribution":"old"}`} {
+	for _, config := range []string{`{"name":"mixed","modules":[{"name":"other","command":"."}]}`, `{"modules":[]}`, `{"modules":[{"name":"x","command":"."}],"python_distribution":"old"}`} {
 		writeTestFile(t, "gobridge.json", config)
 		if _, err := loadProject(); err == nil {
 			t.Fatalf("accepted removed manifest shape: %s", config)

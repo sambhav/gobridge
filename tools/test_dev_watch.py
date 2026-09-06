@@ -23,7 +23,7 @@ def main():
         subprocess.run([str(cli), "generate", "--dir", "bridge"], cwd=project, check=True)
         subprocess.run(["go", "mod", "tidy"], cwd=project, check=True)
         source = project / "bridge/greeter.go"
-        source.write_text('package bridge\nimport _ "embed"\n//go:embed greeting.txt\nvar greeting string\n//gobridge:export\nfunc Greet(name string)string{return greeting+name}\n')
+        source.write_text('//gobridge:module greeter\n//gobridge:npm @acme/greeter\npackage bridge\nimport _ "embed"\n//go:embed greeting.txt\nvar greeting string\n//gobridge:export\nfunc Greet(name string)string{return greeting+name}\n')
         asset = project / "bridge/greeting.txt"
         asset.write_text("v1:")
         app = project / "app.mts"

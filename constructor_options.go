@@ -130,6 +130,5 @@ func newFunctionalObject(r *Registry, fn any, options ...OptionFactory) (*Object
 		}
 		return result
 	})
-	object, err := newObject(r, wrapper.Interface(), generatedTypes)
-	return object, err
+	return newObject(r, wrapper.Interface(), generatedTypes)
 }

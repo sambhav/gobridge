@@ -24,7 +24,8 @@ type Object struct {
 }
 
 // NewObject declares the registry's constructor. It accepts func(Config) *T or
-// func(Config) (*T, error), optionally with a leading context.Context. Config must
+// func(Config) (*T, error), optionally with a leading context.Context. Constructors
+// with no configuration may omit Config entirely. When supplied, Config must
 // be a named wire struct and *T a pointer to a named struct. One constructor is
 // supported per registry; Bind can also register ordinary functions alongside it.
 // A variadic func(...Option) constructor uses ConstructorOption factories to
@@ -56,10 +57,18 @@ func newObject(r *Registry, fn any, generated map[reflect.Type]string) (*Object,
 	if t.NumIn() > 0 && t.In(0) == contextType {
 		offset = 1
 	}
-	if t.NumIn() != offset+1 {
-		return nil, fmt.Errorf("constructor requires one named Config struct and optional leading context.Context")
+	if t.NumIn() > offset+1 {
+		return nil, fmt.Errorf("constructor accepts zero or one named Config struct and optional leading context.Context")
 	}
-	config := t.In(offset)
+	config := reflect.TypeOf(struct{}{})
+	if t.NumIn() == offset+1 {
+		config = t.In(offset)
+	} else {
+		generated = map[reflect.Type]string{config: "Config"}
+		if t.NumOut() > 0 && t.Out(0).Kind() == reflect.Pointer {
+			generated[config] = t.Out(0).Elem().Name() + "Config"
+		}
+	}
 	if config.Kind() != reflect.Struct || (config.Name() == "" && generated == nil) {
 		return nil, fmt.Errorf("constructor Config must be a named struct")
 	}
@@ -116,7 +125,9 @@ func newObject(r *Registry, fn any, generated map[reflect.Type]string) (*Object,
 		if offset == 1 {
 			args = append(args, reflect.ValueOf(ctx))
 		}
-		args = append(args, v)
+		if t.NumIn() > offset {
+			args = append(args, v)
+		}
 		results := f.Call(args)
 		if t.NumOut() == 2 && !results[1].IsNil() {
 			return results[1].Interface().(error)
