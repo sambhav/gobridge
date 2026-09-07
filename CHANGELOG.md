@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.0](https://github.com/sambhav/gobridge/compare/v3.0.0...v3.1.0) (2026-09-07)
+
+
+### Features
+
+* configure modules in Go comments and simplify library setup ([#28](https://github.com/sambhav/gobridge/issues/28)) ([afdcfbb](https://github.com/sambhav/gobridge/commit/afdcfbb285337f98006b00fdab8f4bc5d8307a3c))
+
 ## [3.0.0](https://github.com/sambhav/gobridge/compare/v2.0.0...v3.0.0) (2026-09-06)
 
 
