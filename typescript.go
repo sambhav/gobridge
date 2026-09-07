@@ -146,7 +146,7 @@ func tsRequired(fields []Field) bool {
 
 // GenerateTypeScript emits ESM bindings with concrete readonly models, exact
 // int64 bigint types, lazy instance/module clients, and separate runtime options.
-// The matching package runtime is gobridge-runtime (Node.js 24 and newer).
+// Packages bundle the matching private runtime (Node.js 24 and newer).
 func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string, options ...Option) error {
 	schema, class, err := r.bindingSchema("typescript", class, options)
 	if err != nil {

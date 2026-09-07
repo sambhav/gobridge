@@ -7,7 +7,7 @@ one local subprocess per client, keeping objects and caches alive between calls.
 This README is the complete user guide. [Contributing](CONTRIBUTING.md) covers
 maintainer workflows, protocol internals, benchmarking and releases.
 
-[Quick start](#quick-start) · [Configuration](#configuration) ·
+[Quick start](#quick-start) · [Go package settings](#go-package-settings) ·
 [Names](#names-in-go-source) · [Constructors](#constructors-and-functional-options) ·
 [Build and publish](#build-and-publish) · [Development](#development) ·
 [State and sessions](#share-state-deliberately) · [Types](#types-validation-and-runtime-settings) ·
@@ -32,12 +32,16 @@ gobridge dev -- python app.py
 
 `init --check` previews the files without writing them. Add Go's binary directory
 to your `PATH` if `gobridge` is not found. Scaffolding creates a normal Go module,
-an annotated library, a command entrypoint, `gobridge.json`, and runnable apps.
+an annotated library, its generated adapter, a command entrypoint, package comments,
+and runnable apps. No `gobridge.json` is needed.
 For an existing project, install `github.com/sambhav/gobridge` with `go get` and
 add the same library/entrypoint structure. Generated adapters stay in the library
 package; native Go callers continue using the ordinary Go API.
 
 ```go
+// Package bridge exposes our Go API.
+//gobridge:module acme.greeter
+//gobridge:npm @acme/greeter
 package bridge
 
 //gobridge:export
@@ -92,64 +96,103 @@ Go errors become exceptions. Supported function returns are `T`, `(T, error)`,
 `error`, or no result; void becomes Python `None` or TypeScript `undefined`.
 A leading `context.Context` receives cancellation and deadlines automatically.
 
-## Configuration
+## Go package settings
 
-There is one `gobridge.json` format for one or many modules:
+Keep bridge settings beside the Go API, in the comment immediately above
+`package`. `gobridge init` writes this for you:
+
+```go
+// Package bridge exposes our Go API.
+//gobridge:module acme.greeter
+//gobridge:npm @acme/greeter
+package bridge
+```
+
+Only `module` is required. `dev` and `build` discover annotated packages beneath
+the current directory. The source directory is inferred; a library package named
+`bridge` uses `./cmd/bridge`, while an annotated `package main` uses itself.
+Pass the application version on the command line: `gobridge build --version 1.2.3`
+(or `gobridge dev --version 1.2.3`). It defaults to `0.1.0` unless an explicit JSON
+configuration supplies another default. CLI values take precedence and do not
+modify source or configuration files. Python and npm distribution names default to the
+module name with dots/underscores replaced by hyphens. A single module is the
+npm package's root export. Source annotations determine class, method and field
+names; consumers simply import and call the generated API.
+
+For a different command layout or an existing binary, add:
+
+```go
+//gobridge:command ./cmd/host
+//gobridge:command-prefix ["bridge"]
+```
+
+All command and wrapper paths are relative to the project directory where you
+run `gobridge`. Prefixes are argument arrays, never shell commands.
+
+For multiple modules, put `//gobridge:module acme.catalog` above the second Go
+package's declaration. Each module owns its command, client and default state;
+all modules ship in one wheel per target and one npm tarball. Select one during
+development with `gobridge dev --module acme.catalog`. Use `ts-export` when you
+want a specific npm subpath. No separate module mapping file is required.
+
+| Optional package comment | Meaning |
+| --- | --- |
+| `//gobridge:command ./cmd/host` | Go main package; default `./cmd/<Go package name>`. |
+| `//gobridge:command-prefix ["bridge"]` | Subcommands inside an embedded host. |
+| `//gobridge:python-module acme.catalog` | Override the Python import path independently of the module identifier. |
+| `//gobridge:ts-export ./catalog` | Override the npm export path. |
+| `//gobridge:python-package ./python-package` | Handwritten Python wrappers/assets. |
+| `//gobridge:ts-package ./typescript-package` | Handwritten TypeScript wrappers/assets. |
+| `//gobridge:distribution acme-sdk` | pip/PyPI distribution name. |
+| `//gobridge:npm @acme/sdk` | npm package name. |
+| `//gobridge:repository https://github.com/acme/sdk` | Package repository metadata. |
+| `//gobridge:license Apache-2.0` | Package license metadata. |
+| `//gobridge:python-requires ["typing-extensions>=4"]` | Python package dependencies. |
+| `//gobridge:npm-dependencies {"example":"^1.0.0"}` | npm package dependencies. |
+
+Distribution settings apply to the whole build: declare them on one module, or
+repeat identical values. Conflicts and unknown settings fail with the source
+filename. Declare module settings once per package. Discovery respects host Go
+build constraints and skips tests, dependencies, build outputs and nested Go
+modules. It never runs constructors or application startup code.
+
+Python dotted paths create PEP 420 namespace parents. TypeScript ESM packages
+include JavaScript and declarations. Neither consumer needs Go installed.
+
+### Optional explicit configuration
+
+Projects with external source directories, manual registries, or several mappings
+of the same source may use `gobridge.json` instead. When present, it is authoritative;
+Go package settings are not merged into it. A single module needs only:
+
+```json
+{"name": "acme.greeter", "version": "0.1.0"}
+```
+
+This uses `./bridge` and `./cmd/bridge`. Set `source`, `command` and
+`command_prefix` for another layout. An explicit `command` without `source`
+skips adapter generation. Distribution metadata lives in `python.distribution`,
+`python.requires`, `typescript.package`, `typescript.dependencies`, `repository`
+and `license`.
+
+For advanced mapping, replace the flat module fields with `modules`:
 
 ```json
 {
-  "version": "0.1.0",
   "python": {"distribution": "acme-sdk"},
   "typescript": {"package": "@acme/sdk"},
   "modules": [
-    {
-      "name": "greeter",
-      "source": "./bridge",
-      "command": "./cmd/bridge",
-      "python": {"module": "acme.greeter", "class": "Greeter"},
-      "typescript": {"export": ".", "class": "Greeter"}
-    },
-    {
-      "name": "catalog",
-      "source": "./catalog",
-      "command": "./cmd/catalog",
-      "python": {"module": "acme.catalog"},
-      "typescript": {"export": "./catalog"}
-    }
+    {"name": "acme.greeter", "source": "./bridge", "command": "./cmd/bridge"},
+    {"name": "acme.catalog", "source": "./catalog", "command": "./cmd/catalog"}
   ]
 }
 ```
 
-Include only modules present in your project. The second entry demonstrates
-multiple modules; the scaffold creates a single entry. A module owns its command,
-clients, bundled executable, and default lifecycle. Multiple modules can wrap
-the same command with different names. All modules ship in one wheel per target
-and one npm tarball. The complete [multi-module example](examples/modules/gobridge.json)
-can be built from its directory with `go run ../../cmd/gobridge build --python --typescript`.
-
-| Setting | Meaning/default |
-| --- | --- |
-| `version` | Application version; defaults to `0.1.0`. |
-| `repository`, `license` | Distribution metadata. |
-| `python.distribution` | pip/PyPI name; defaults to the first Python module path with dots/underscores replaced by hyphens. |
-| `python.requires` | Application dependencies using names, extras, and version comparisons. |
-| `typescript.package` | npm name, optionally `@scope/name`; same derived default as Python distribution. |
-| `typescript.dependencies` | Application npm dependency map. |
-| `modules[].name` | Required unique identifier used by `dev --module`. |
-| `modules[].source` | Directory scanned for annotations; omit for manual registration. |
-| `modules[].command` | Required Go main package. |
-| `modules[].command_prefix` | Argument array locating bridge commands inside an existing binary, e.g. `["bridge"]`. |
-| `modules[].python.module` | Python import path; defaults to module name. |
-| `modules[].typescript.export` | npm export path, `.` or `./subpath`; defaults to module name with dots changed to slashes and prefixed by `./`. |
-| `modules[].python.class`, `modules[].typescript.class` | Explicit generated class names; otherwise source annotations or a name derived from the Python import path. |
-| `modules[].python.package`, `modules[].typescript.package` | Optional directories containing handwritten wrappers/assets. |
-| `modules[].python.rename`, `modules[].typescript.rename` | Per-language operation, type, and field rename maps. |
-
-Python dotted paths create PEP 420 namespace parents, which remain free of
-`__init__.py` unless another configured module supplies one. The module leaf
-contains typed bindings, `py.typed`, its private runtime, and its executable.
-TypeScript ESM exports include JavaScript and declarations. Distribution names,
-Python imports, npm export paths, and client class names are independent.
+An entry may override `python.module`, `typescript.export`, each language's
+`class`, `package` and `rename` maps, plus `command_prefix`. Python imports default
+to `name`; explicit JSON module entries default to npm subpaths made by replacing
+dots with slashes and prepending `./`. Set `typescript.export` to `.` for a root
+export. Use Go comments and struct tags for names whenever you own the source.
 
 ## Names in Go source
 
@@ -173,7 +216,7 @@ nested structs and containers. Put language annotations on a constructor or its
 receiver struct to name the generated client class. Put them on other model
 structs to name generated dataclasses and TypeScript interfaces.
 
-Set rename maps in a module's language settings, for example:
+When adapting source you do not own, optional JSON module rename maps provide an override:
 
 ```json
 {"python": {"rename": {"operations": {"lookup": "find"}, "types": {"Item": "Product"}, "fields": {"Item.item_id": "id"}}}}
@@ -211,6 +254,19 @@ options without mutating the registry. A configured language class overrides
 the generator's fallback class argument. No separate builder is needed.
 
 ## Constructors and functional options
+
+Keep your ordinary Go constructor. If it needs no options, no config struct is required:
+
+```go
+type Counter struct { /* state */ }
+
+//gobridge:constructor
+func NewCounter() *Counter { return &Counter{} }
+```
+
+A leading `context.Context` and an optional `error` return also work. Generated
+clients initialize the receiver on first use; consumers do not call an init API.
+Use a config struct or functional options only when your Go API needs them.
 
 A constructor creates one Go object per client. For a simple config struct:
 
@@ -448,8 +504,7 @@ mutating live imports or transferring Go state. Stop with Ctrl-C and remove old
 revisions only after clients have stopped.
 
 The watcher scans beneath the project directory, excluding generated/dependency
-outputs. Changes in external local `replace` modules require restart. Manifest
-edits pause reloads and request restart. Run your own application compiler/watch
+outputs. Changes in external local `replace` modules require restart. Changes to package settings or an explicit manifest pause reloads and request restart. Run your own application compiler/watch
 command if you need transpilation beyond Node's native TypeScript support.
 
 ## Share state deliberately
@@ -610,7 +665,7 @@ bridgeCommand := &cobra.Command{
 root.AddCommand(bridgeCommand)
 ```
 
-Set the module's `"command_prefix": ["bridge"]` in `gobridge.json`. Build and dev
+Add `//gobridge:command-prefix ["bridge"]` to the Go package comment. Build and dev
 invoke `host bridge generate-python` or `host bridge generate-typescript`; generated
 clients launch `host bridge serve` automatically. Prefixes are argv arrays, never
 shell strings. Each module may select a different subcommand in the same host.

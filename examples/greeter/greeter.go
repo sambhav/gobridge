@@ -1,4 +1,6 @@
 // Package greeter demonstrates an ordinary Go library with generated CLI and Python adapters.
+//
+//gobridge:module greeter
 package greeter
 
 //go:generate go run ../../cmd/gobridge generate --dir . --output zz_gobridge.gen.go

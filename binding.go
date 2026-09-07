@@ -33,10 +33,11 @@ func compileBinding(name string, fn reflect.Value, receiver func() reflect.Value
 		return operation{}, fmt.Errorf("expected a non-nil function")
 	}
 	t := fn.Type()
+	var yieldType reflect.Type
 	if t.NumIn() > 0 && t.NumOut() == 1 && t.Out(0) == errorType && !t.IsVariadic() {
 		last := t.In(t.NumIn() - 1)
 		if last.Kind() == reflect.Func && last.NumIn() == 1 && last.NumOut() == 1 && last.Out(0) == errorType && !last.IsVariadic() {
-			return compileStreamBinding(name, fn, receiver, paramNames)
+			yieldType = last
 		}
 	}
 	if t.IsVariadic() {
@@ -50,8 +51,15 @@ func compileBinding(name string, fn reflect.Value, receiver func() reflect.Value
 	if hasContext {
 		offset++
 	}
-	if len(paramNames) != t.NumIn()-offset {
-		return operation{}, fmt.Errorf("expected %d explicit parameter names, got %d", t.NumIn()-offset, len(paramNames))
+	count := t.NumIn() - offset
+	if yieldType != nil {
+		if !hasContext {
+			return operation{}, fmt.Errorf("stream producer requires context.Context")
+		}
+		count--
+	}
+	if len(paramNames) != count {
+		return operation{}, fmt.Errorf("expected %d explicit parameter names, got %d", count, len(paramNames))
 	}
 	fields := make([]reflect.StructField, len(paramNames))
 	seen := make(map[string]bool, len(paramNames))
@@ -87,6 +95,9 @@ func compileBinding(name string, fn reflect.Value, receiver func() reflect.Value
 	default:
 		return operation{}, fmt.Errorf("expected T, (T, error), error, or no results")
 	}
+	if yieldType != nil {
+		output = yieldType.In(0)
+	}
 	if output != nil {
 		if err := validateType(output, make(map[reflect.Type]bool)); err != nil {
 			return operation{}, fmt.Errorf("result: %w", err)
@@ -104,7 +115,7 @@ func compileBinding(name string, fn reflect.Value, receiver func() reflect.Value
 	}
 	inputName.WriteString("Params")
 	op := operation{name: name, in: input, out: output, inName: inputName.String()}
-	op.call = func(ctx context.Context, raw json.RawMessage) (any, error) {
+	invoke := func(ctx context.Context, raw json.RawMessage, yield func(any) error) (any, error) {
 		value, err := decodeInput(raw, input)
 		if err != nil {
 			return nil, Failure("invalid_argument", err.Error())
@@ -119,14 +130,30 @@ func compileBinding(name string, fn reflect.Value, receiver func() reflect.Value
 		for j := range paramNames {
 			args = append(args, value.Field(j))
 		}
+		if yieldType != nil {
+			args = append(args, reflect.MakeFunc(yieldType, func(values []reflect.Value) []reflect.Value {
+				err := yield(values[0].Interface())
+				return []reflect.Value{reflect.ValueOf(&err).Elem()}
+			}))
+		}
 		results := fn.Call(args)
 		if hasError && !results[len(results)-1].IsNil() {
 			return nil, results[len(results)-1].Interface().(error)
 		}
-		if output == nil {
+		if output == nil || yieldType != nil {
 			return nil, nil
 		}
 		return results[0].Interface(), nil
+	}
+	if yieldType != nil {
+		op.stream = func(ctx context.Context, raw json.RawMessage, yield func(any) error) error {
+			_, err := invoke(ctx, raw, yield)
+			return err
+		}
+	} else {
+		op.call = func(ctx context.Context, raw json.RawMessage) (any, error) {
+			return invoke(ctx, raw, nil)
+		}
 	}
 	return op, nil
 }

@@ -1,4 +1,6 @@
 // Package catalog demonstrates exported functional options and language names.
+//
+//gobridge:module catalog
 package catalog
 
 import "github.com/sambhav/gobridge"

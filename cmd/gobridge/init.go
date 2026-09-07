@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/sambhav/gobridge/internal/sourcegen"
 )
 
 func runInit(args []string, log io.Writer) error {
@@ -38,8 +40,13 @@ func runInit(args []string, log io.Writer) error {
 	if p.NPMPackage == "" {
 		p.NPMPackage = p.distributionName()
 	}
-	if len(p.NPMPackage) > 214 || !regexp.MustCompile(`^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`).MatchString(p.NPMPackage) || p.NPMPackage == "gobridge-runtime" {
+	if !validNPMName(p.NPMPackage) {
 		return fmt.Errorf("invalid npm package %q", p.NPMPackage)
+	}
+	if _, err := os.Stat(filepath.Join(*dir, "gobridge.json")); err == nil {
+		return fmt.Errorf("project already contains gobridge.json; add annotations to its existing Go source instead")
+	} else if !os.IsNotExist(err) {
+		return err
 	}
 	files := map[string]string{}
 	existing, err := os.ReadFile(filepath.Join(*dir, "go.mod"))
@@ -64,16 +71,36 @@ func runInit(args []string, log io.Writer) error {
 	if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~/-]*$`).MatchString(*modulePath) || strings.Contains(*modulePath, "..") {
 		return fmt.Errorf("invalid Go module path %q", *modulePath)
 	}
-	data, _ := json.MarshalIndent(p.manifest(), "", "  ")
-	files["gobridge.json"] = string(data) + "\n"
-	files["bridge/greeter.go"] = "package bridge\n\n// Greet returns a friendly greeting.\n//gobridge:export\nfunc Greet(name string) string { return \"Hello, \" + name + \"!\" }\n"
+	packageDoc := "// Package bridge exposes the Go API to Python and TypeScript.\n//\n//gobridge:module " + p.Name + "\n"
+	if p.NPMPackage != p.distributionName() {
+		packageDoc += "//gobridge:npm " + p.NPMPackage + "\n"
+	}
+	files["bridge/greeter.go"] = packageDoc + "package bridge\n\n// Greet returns a friendly greeting.\n//gobridge:export\nfunc Greet(name string) string { return \"Hello, \" + name + \"!\" }\n"
 	main, err := format.Source([]byte(fmt.Sprintf("package main\nimport (\"log\"; bridge %q)\nfunc main(){r,err:=bridge.NewGobridge();if err!=nil{log.Fatal(err)};r.Main()}\n", *modulePath+"/bridge")))
 	if err != nil {
 		return err
 	}
 	files["cmd/bridge/main.go"] = string(main)
-	files["app.py"] = fmt.Sprintf("from %s import Sync%s\n\nwith Sync%s() as client:\n    print(client.greet(name=\"World\"))\n", p.Name, p.Class, p.Class)
-	files["app.mts"] = fmt.Sprintf("import { %s } from %q;\n\nawait using client = new %s();\nconsole.log(await client.greet({ name: \"World\" }));\n", p.Class, p.NPMPackage, p.Class)
+	files["app.py"] = fmt.Sprintf("from %s import greet_sync\n\nprint(greet_sync(name=\"World\"))\n", p.Name)
+	files["app.mts"] = fmt.Sprintf("import { greet } from %q;\n\nconsole.log(await greet({ name: \"World\" }));\n", p.NPMPackage)
+	// Include the generated adapter so go mod tidy sees the runtime dependency
+	// immediately. The same generator serves init, dev, and build.
+	stage, err := os.MkdirTemp("", "gobridge-init-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stage)
+	if err := os.WriteFile(filepath.Join(stage, "greeter.go"), []byte(files["bridge/greeter.go"]), 0644); err != nil {
+		return err
+	}
+	if err := sourcegen.Generate(stage, "zz_gobridge.gen.go"); err != nil {
+		return err
+	}
+	adapter, err := os.ReadFile(filepath.Join(stage, "zz_gobridge.gen.go"))
+	if err != nil {
+		return err
+	}
+	files["bridge/zz_gobridge.gen.go"] = string(adapter)
 	// Check the whole file set before writing anything. Never adopt existing files.
 	for path := range files {
 		dest := filepath.Join(*dir, path)
@@ -116,7 +143,7 @@ func runInit(args []string, log io.Writer) error {
 			return closeErr
 		}
 	}
-	fmt.Fprintln(log, "Created project. Run:\n  gobridge generate --dir bridge\n  go mod tidy\n  gobridge dev -- python app.py\n  gobridge build --python --typescript")
+	fmt.Fprintln(log, "Created project. Run:\n  go mod tidy\n  gobridge dev -- python app.py\n  gobridge build --python --typescript")
 	return nil
 }
 

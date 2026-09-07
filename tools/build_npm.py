@@ -50,6 +50,7 @@ def pack(stage, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--settings", type=json.loads, help="resolved distribution settings from gobridge")
     parser.add_argument("--modules", type=Path, help="resolved module manifest from gobridge build")
     parser.add_argument("--targets", nargs="+", choices=TARGETS, default=list(TARGETS))
     parser.add_argument("--build-cache", type=Path, help="reuse Go link outputs; Go still checks sources and flags")
@@ -138,7 +139,7 @@ def main():
         }
         if "." not in exports:
             manifest.pop("main"); manifest.pop("types")
-        dependencies = settings(project).get("typescript", {}).get("dependencies", {})
+        dependencies = settings(project, args.settings).get("typescript", {}).get("dependencies", {})
         if dependencies:
             manifest["dependencies"] = dependencies
         if custom or args.modules:

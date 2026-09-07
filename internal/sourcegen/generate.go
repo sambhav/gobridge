@@ -247,8 +247,8 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 			if constructor != "" {
 				return fail(fmt.Errorf("multiple constructors: %s and %s; one object per registry is supported", constructor, fn.Name.Name))
 			}
-			if !isFunctional && len(params) != 1 {
-				return fail(fmt.Errorf("constructor needs one named options parameter and optional leading context.Context"))
+			if !isFunctional && len(params) > 1 {
+				return fail(fmt.Errorf("constructor accepts zero or one named options parameter and optional leading context.Context"))
 			}
 			results := resultTypes(fn.Type.Results)
 			if len(results) < 1 || len(results) > 2 || (len(results) == 2 && !isIdent(results[1], "error")) {

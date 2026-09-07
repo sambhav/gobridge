@@ -107,6 +107,7 @@ func TestObjectConstructorFailures(t *testing.T) {
 		{"panic", func(counterOptions) *boundCounter { panic("secret") }, `{"initial":1}`, "internal"},
 		{"nil", func(counterOptions) *boundCounter { return nil }, `{"initial":1}`, "internal"},
 		{"missing_config", func(counterOptions) *boundCounter { return &boundCounter{} }, `{}`, "invalid_argument"},
+		{"unknown_empty_config", func() *boundCounter { return &boundCounter{} }, `{ "extra": 2 }`, "invalid_argument"},
 		{"unknown_config", func(counterOptions) *boundCounter { return &boundCounter{} }, `{"initial":1,"extra":2}`, "invalid_argument"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -222,5 +223,49 @@ func TestObjectCLIConfig(t *testing.T) {
 	}
 	if out.String() != "12\n" || calls.Load() != 1 {
 		t.Fatalf("unexpected CLI result: %s", out.String())
+	}
+}
+
+func TestObjectWithoutConfig(t *testing.T) {
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, true)
+	for _, withContext := range []bool{false, true} {
+		r := New()
+		called := 0
+		var fn any = func() *boundCounter { called++; return &boundCounter{} }
+		if withContext {
+			fn = func(ctx context.Context) (*boundCounter, error) {
+				if ctx.Value(contextKey{}) != true {
+					t.Error("constructor lost context")
+				}
+				called++
+				return &boundCounter{}, nil
+			}
+		}
+		object, err := NewObject(r, fn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := object.Bind("add", (*boundCounter).Add, "amount"); err != nil {
+			t.Fatal(err)
+		}
+		for _, generate := range []func() error{
+			func() error { return r.GeneratePython(&bytes.Buffer{}, "Counter", "counter") },
+			func() error { return r.GenerateTypeScript(&bytes.Buffer{}, "Counter", "counter") },
+		} {
+			if err := generate(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if called != 0 || r.Schema().Constructor == nil || len(r.Schema().Constructor.Fields) != 0 {
+			t.Fatal("generation initialized constructor or exposed parameters")
+		}
+		if err := r.Initialize(ctx, nil); err != nil {
+			t.Fatal(err)
+		}
+		value, err := r.Call(ctx, "add", []byte(`{"amount":2}`))
+		if err != nil || value != int64(2) || called != 1 {
+			t.Fatalf("result %v, error %v, constructors %d", value, err, called)
+		}
 	}
 }

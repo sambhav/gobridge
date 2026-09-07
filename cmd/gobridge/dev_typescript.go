@@ -65,6 +65,8 @@ func buildDevTypeScript(ctx context.Context, options devOptions, binary string, 
 		moduleArgs = []string{"--modules", path}
 	}
 	cmd := exec.CommandContext(ctx, interpreter, filepath.Join(tooling, "tools", "build_npm.py"), "--project", absolute("."), "--package", options.NPMPackage, "--class", options.Class, "--binary", options.binaryName(), "--version", options.Version, "--targets", runtime.GOOS+"-"+runtime.GOARCH, "--host-binary", binary, "--dev-output", options.output)
+	settings, _ := json.Marshal(options.project.manifest())
+	cmd.Args = append(cmd.Args, "--settings", string(settings))
 	cmd.Args = append(cmd.Args, moduleArgs...)
 	cmd.Stdout = log
 	cmd.Stderr = log
