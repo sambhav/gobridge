@@ -299,6 +299,73 @@ async with Greeter(prefix="Hey, ") as client:
 The CLI accepts constructor data before the operation:
 `--config '{"prefix":"Hey, "}' welcome --name Sam`. Defaults belong in Go.
 
+### Lightweight classes sharing a daemon
+
+Add `//gobridge:shared` when objects represent serializable configuration and
+should reuse one module transport:
+
+```go
+type Config struct { Account string `json:"account"` }
+type AuthClient struct { config Config }
+
+//gobridge:constructor
+//gobridge:shared
+//gobridge:python AuthClient
+//gobridge:ts AuthClient
+func NewAuthClient(config Config) *AuthClient { return &AuthClient{config: config} }
+
+//gobridge:export
+func (a *AuthClient) Account() string { return a.config.Account }
+```
+
+```python
+import auth
+
+first = auth.AuthClient(account="work")
+second = auth.AuthClient(account="personal")  # still zero daemons
+assert await first.account() == "work"       # starts the module daemon
+assert await second.account() == "personal"  # reuses it
+
+async with auth.session():                  # owns an isolated daemon
+    assert await first.account() == "work"   # uses this session
+
+await auth.shutdown()                       # closes the module daemon
+```
+
+```typescript
+import { AuthClient, session, shutdown } from "auth";
+
+const first = new AuthClient({account: "work"});
+const second = new AuthClient({account: "personal"});
+await Promise.all([first.account(), second.account()]); // one daemon
+await session({}, async () => { await first.account(); }); // isolated daemon
+await shutdown();
+```
+
+Python also generates `SyncAuthClient` for synchronous calls. Shared objects
+snapshot nested configuration at construction and have no process lifecycle of
+their own. Each operation sends that configuration and constructs a **fresh Go
+receiver**; streams retain that receiver until the stream finishes. Receiver
+mutations do not survive another operation. Constructors and option factories
+should be cheap and must not acquire resources requiring cleanup. Keep ordinary
+`//gobridge:constructor` for stateful receivers and process initialization.
+
+`configure(...)` sets transport options only in shared mode. Exported free
+functions share the same daemon; receiver methods live on the domain class.
+Use `session()` / `session_sync()` for scoped isolation, or create an explicit
+`AuthClientSession` (`SyncAuthClientSession` in synchronous Python) and pass it
+as `_client` to an object to pin its transport. Explicit sessions own their
+lifecycle and are unaffected by module shutdown. `object.calls.method(...)`
+creates configuration-bound descriptors for a transport's batch API.
+
+Manual registration uses `NewSharedObject` in place of `NewObject`, including
+functional-option factories. The CLI still accepts `--config` before an
+operation. The schema exposes `shared_constructor` and marks receiver operations
+with `shared: true`; their wire parameters are `{config: {...}, params: {...}}`.
+Shared constructors do not require a daemon `$init` call.
+
+### Functional options
+
 Annotate the constructor and the option factories you want to expose:
 
 ```go

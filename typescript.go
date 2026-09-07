@@ -155,6 +155,10 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string, options
 	if !regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`).MatchString(class) || typescriptReserved[class] {
 		return fmt.Errorf("class must be a TypeScript class identifier")
 	}
+	domainClass := class
+	if schema.SharedConstructor != nil {
+		class += "Session"
+	}
 	if !regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(binary) {
 		return fmt.Errorf("binary must be a filename stem")
 	}
@@ -164,6 +168,12 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string, options
 	}
 	optionsName := class + "Options"
 	reserved[class], reserved[optionsName] = true, true
+	if schema.SharedConstructor != nil {
+		if reserved[domainClass] || reserved[domainClass+"Options"] {
+			return fmt.Errorf("class %s conflicts with generated symbols", domainClass)
+		}
+		reserved[domainClass], reserved[domainClass+"Options"] = true, true
+	}
 	types := map[string]Type{}
 	var visit func(Type) error
 	visit = func(t Type) error {
@@ -205,6 +215,11 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string, options
 		}
 	}
 	operations := map[string]string{}
+	if schema.SharedConstructor != nil {
+		if err := visit(*schema.SharedConstructor); err != nil {
+			return err
+		}
+	}
 	for _, op := range schema.Operations {
 		name := tsOperationName(op)
 		if !typescriptIdentifier.MatchString(name) || typescriptReserved[name] || typescriptMethodReserved[name] || reserved[name] || strings.HasPrefix(name, "_bridge") {
@@ -272,7 +287,7 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string, options
 	fmt.Fprintln(&b)
 	fmt.Fprint(&b, "export const calls = {\n")
 	for index, op := range schema.Operations {
-		if op.Stream {
+		if op.Stream || op.Shared {
 			continue
 		}
 		params, input := "", "{}"
@@ -305,6 +320,9 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string, options
 	}
 	fmt.Fprint(&b, "    });\n  }\n\n")
 	for index, op := range schema.Operations {
+		if op.Shared {
+			continue
+		}
 		tsJSDoc(&b, "  ", op.Description, nil)
 		params := "options?: _bridgeCallOptions"
 		input := "{}"
@@ -326,7 +344,15 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string, options
 	fmt.Fprintf(&b, "export function configure(options: %s): void {\n  _bridgeDefaults.configure(options);\n}\n\n", optionsName)
 	fmt.Fprintf(&b, "export function session<R>(options: %s, callback: (client: %s) => R | Promise<R>): Promise<R> {\n  return _bridgeDefaults.scope(options, callback);\n}\n\n", optionsName, class)
 	fmt.Fprint(&b, "export function shutdown(): Promise<void> {\n  return _bridgeDefaults.close();\n}\n\n")
+	if schema.SharedConstructor != nil {
+		if err := visit(*schema.SharedConstructor); err != nil {
+			return err
+		}
+	}
 	for _, op := range schema.Operations {
+		if op.Shared {
+			continue
+		}
 		tsJSDoc(&b, "", op.Description, nil)
 		params := "options?: _bridgeCallOptions"
 		args := "options"
@@ -339,6 +365,9 @@ func (r *Registry) GenerateTypeScript(w io.Writer, class, binary string, options
 			returnType = "AsyncGenerator"
 		}
 		fmt.Fprintf(&b, "export function %s(%s): %s<%s> {\n  return _bridgeDefaults.client().%s(%s);\n}\n\n", tsOperationName(op), params, returnType, tsType(op.Output), tsOperationName(op), args)
+	}
+	if schema.SharedConstructor != nil {
+		tsShared(&b, schema, domainClass)
 	}
 	_, err = io.WriteString(w, b.String())
 	return err

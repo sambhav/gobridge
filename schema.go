@@ -288,6 +288,7 @@ type Field struct {
 	Constraints                *Constraints `json:"constraints,omitempty"`
 }
 type Operation struct {
+	Shared      bool   `json:"shared,omitempty"`
 	Stream      bool   `json:"stream,omitempty"`
 	PublicName  string `json:"public_name,omitempty"`
 	Name        string `json:"name"`
@@ -296,10 +297,11 @@ type Operation struct {
 	Output      Type   `json:"output"`
 }
 type Schema struct {
-	Protocol    int         `json:"protocol"`
-	Hash        string      `json:"schema_hash"`
-	Operations  []Operation `json:"operations"`
-	Constructor *Type       `json:"constructor,omitempty"`
+	SharedConstructor *Type       `json:"shared_constructor,omitempty"`
+	Protocol          int         `json:"protocol"`
+	Hash              string      `json:"schema_hash"`
+	Operations        []Operation `json:"operations"`
+	Constructor       *Type       `json:"constructor,omitempty"`
 }
 
 func describe(t reflect.Type) Type {
@@ -348,7 +350,7 @@ func (r *Registry) Schema() Schema {
 	s := Schema{Protocol: 1, Operations: []Operation{}}
 	for _, n := range r.names() {
 		op := r.ops[n]
-		s.Operations = append(s.Operations, Operation{Stream: op.stream != nil, Name: n, Description: op.description, Input: op.inputSchema(), Output: describe(op.out)})
+		s.Operations = append(s.Operations, Operation{Shared: op.shared, Stream: op.stream != nil, Name: n, Description: op.description, Input: op.inputSchema(), Output: describe(op.out)})
 	}
 	data, _ := json.Marshal(s.Operations)
 	if r.constructor != nil {
@@ -358,6 +360,13 @@ func (r *Registry) Schema() Schema {
 			Operations  []Operation `json:"operations"`
 			Constructor *Type       `json:"constructor"`
 		}{s.Operations, s.Constructor})
+		if r.constructor.shared {
+			s.Constructor, s.SharedConstructor = nil, &t
+			data, _ = json.Marshal(struct {
+				Operations  []Operation `json:"operations"`
+				Constructor *Type       `json:"shared_constructor"`
+			}{s.Operations, s.SharedConstructor})
+		}
 	}
 	s.Hash = fmt.Sprintf("%x", sha256.Sum256(data))
 	return s

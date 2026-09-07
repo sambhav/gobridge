@@ -40,6 +40,7 @@ func wireError(err error) *Error {
 }
 
 type operation struct {
+	shared            bool
 	name, description string
 	in, out           reflect.Type
 	inName            string

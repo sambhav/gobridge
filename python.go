@@ -97,7 +97,7 @@ func pyParams(b *strings.Builder, fields []Field) {
 	fmt.Fprint(b, "}.items() if value is not _bridge_UNSET}")
 }
 
-func pyMethod(b *strings.Builder, op Operation, name, indent, prefix, receiver, call string) {
+func pyMethod(b *strings.Builder, op Operation, name, indent, prefix, receiver, call string, config ...string) {
 	fmt.Fprintf(b, "%s%sdef %s(%s*", indent, prefix, name, receiver)
 	pyFields(b, op.Input.Fields)
 	resultType := pyType(op.Output)
@@ -121,12 +121,12 @@ func pyMethod(b *strings.Builder, op Operation, name, indent, prefix, receiver, 
 			scope, loop = "async with _bridge_aclosing", "async for"
 		}
 		fmt.Fprintf(b, "%s    %s(%s(%q, ", indent, scope, streamCall, op.Name)
-		pyParams(b, op.Input.Fields)
+		pySharedParams(b, op.Input.Fields, config...)
 		fmt.Fprintf(b, ", timeout=_timeout)) as items:\n%s        %s result in items:\n%s            yield _bridge_decode(%s, result)\n\n", indent, loop, indent, pyDecodeType(op.Output))
 		return
 	}
 	fmt.Fprintf(b, "%s    result = %s(%q, ", indent, call, op.Name)
-	pyParams(b, op.Input.Fields)
+	pySharedParams(b, op.Input.Fields, config...)
 	fmt.Fprintf(b, ", timeout=_timeout)\n%s    return _bridge_decode(%s, result)\n\n", indent, pyDecodeType(op.Output))
 }
 
@@ -140,6 +140,10 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string, options ...
 	if !regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`).MatchString(class) {
 		return fmt.Errorf("class must be a Python class identifier")
 	}
+	domainClass := class
+	if s.SharedConstructor != nil {
+		class += "Session"
+	}
 	if !regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(binary) {
 		return fmt.Errorf("binary must be a filename stem")
 	}
@@ -152,6 +156,12 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string, options ...
 		return fmt.Errorf("class %s conflicts with generated symbols", class)
 	}
 	reserved[class], reserved["Sync"+class] = true, true
+	if s.SharedConstructor != nil {
+		if reserved[domainClass] || pythonReserved[domainClass] {
+			return fmt.Errorf("class %s conflicts with generated symbols", domainClass)
+		}
+		reserved[domainClass], reserved["Sync"+domainClass] = true, true
+	}
 	var visit func(Type) error
 	visit = func(t Type) error {
 		if t.Elem != nil {
@@ -179,6 +189,11 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string, options ...
 	}
 	if s.Constructor != nil {
 		if err := visit(*s.Constructor); err != nil {
+			return err
+		}
+	}
+	if s.SharedConstructor != nil {
+		if err := visit(*s.SharedConstructor); err != nil {
 			return err
 		}
 	}
@@ -293,7 +308,7 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string, options ...
 	fmt.Fprint(&b, "class _bridge_Calls:\n")
 	unary := 0
 	for _, op := range s.Operations {
-		if op.Stream {
+		if op.Stream || op.Shared {
 			continue
 		}
 		unary++
@@ -335,11 +350,17 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string, options ...
 			fmt.Fprint(&b, "        _bridge_require_sync()\n        return super().__enter__()\n\n")
 		}
 		for _, op := range s.Operations {
+			if op.Shared {
+				continue
+			}
 			pyMethod(&b, op, op.publicName(), "    ", prefix, "self, ", call)
 		}
 	}
 	fmt.Fprintf(&b, "_bridge_defaults = _bridge_Defaults(Sync%s)\n\n", class)
 	for _, op := range s.Operations {
+		if op.Shared {
+			continue
+		}
 		pyMethod(&b, op, op.publicName(), "", "async ", "", "await _bridge_defaults.client().acall")
 		pyMethod(&b, op, op.publicName()+"_sync", "", "", "", "_bridge_defaults.client().call")
 	}
@@ -372,6 +393,9 @@ func (r *Registry) GeneratePython(w io.Writer, class, binary string, options ...
 		}
 	}
 	fmt.Fprint(&b, "async def shutdown() -> None:\n    \"\"\"Close/reset the module default; explicit sessions stay open.\"\"\"\n    await _bridge_defaults.aclose()\n\ndef shutdown_sync() -> None:\n    \"\"\"Close/reset the default from synchronous code.\"\"\"\n    _bridge_require_sync()\n    _bridge_defaults.close()\n")
+	if s.SharedConstructor != nil {
+		pyShared(&b, s, domainClass)
+	}
 	_, err = io.WriteString(w, b.String())
 	return err
 }

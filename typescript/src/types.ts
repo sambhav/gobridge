@@ -24,6 +24,7 @@ export interface WireType {
   readonly fields?: readonly Field[];
 }
 export interface Operation {
+  readonly shared?: boolean;
   readonly stream?: boolean;
   readonly name: string;
   readonly description: string;
@@ -31,6 +32,7 @@ export interface Operation {
   readonly output: WireType;
 }
 export interface Schema {
+  readonly shared_constructor?: WireType;
   readonly protocol: number;
   readonly schema_hash: string;
   readonly operations: readonly Operation[];

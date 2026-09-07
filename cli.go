@@ -360,7 +360,21 @@ func (r *Registry) Run(ctx context.Context, args []string, in io.Reader, out, st
 		if len(config) > MaxFrame {
 			return fmt.Errorf("constructor config exceeds frame limit")
 		}
-		if err := r.Initialize(ctx, config); err != nil {
+		if r.constructor.shared {
+			if r.ops[args[0]].shared {
+				if len(config) == 0 {
+					config = json.RawMessage("{}")
+				}
+				var err error
+				raw, err = json.Marshal(map[string]json.RawMessage{"config": config, "params": raw})
+				if err != nil {
+					return err
+				}
+				if len(raw) > MaxFrame {
+					return fmt.Errorf("input exceeds frame limit")
+				}
+			}
+		} else if err := r.Initialize(ctx, config); err != nil {
 			return err
 		}
 	}

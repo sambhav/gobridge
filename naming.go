@@ -176,6 +176,11 @@ func (r *Registry) bindingSchema(language, class string, options []Option) (Sche
 			}
 		}
 	}
+	if schema.SharedConstructor != nil {
+		if err := visit(schema.SharedConstructor); err != nil {
+			return schema, class, err
+		}
+	}
 	for kind, values := range map[string]map[string]string{"operations": names.Operations, "types": names.Types, "fields": names.Fields} {
 		for key, value := range values {
 			if !used[kind+":"+key] || value == "" {

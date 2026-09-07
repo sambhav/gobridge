@@ -28,7 +28,7 @@ func Bind(r *Registry, name string, fn any, paramNames ...string) error {
 }
 
 // receiver supplies the initialized process-owned receiver for method expressions.
-func compileBinding(name string, fn reflect.Value, receiver func() reflect.Value, paramNames []string) (operation, error) {
+func compileBinding(name string, fn reflect.Value, receiver func(context.Context) reflect.Value, paramNames []string) (operation, error) {
 	if !fn.IsValid() || fn.Kind() != reflect.Func || fn.IsNil() {
 		return operation{}, fmt.Errorf("expected a non-nil function")
 	}
@@ -122,7 +122,7 @@ func compileBinding(name string, fn reflect.Value, receiver func() reflect.Value
 		}
 		args := make([]reflect.Value, 0, t.NumIn())
 		if receiver != nil {
-			args = append(args, receiver())
+			args = append(args, receiver(ctx))
 		}
 		if hasContext {
 			args = append(args, reflect.ValueOf(ctx))

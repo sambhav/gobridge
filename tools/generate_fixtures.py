@@ -6,6 +6,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = {
+    "shared": ("./internal/fixtures/shared", "AuthClient"),
     "typesplus": ("./internal/fixtures/typesplus", "TypesPlus"),
     "streaming": ("./internal/fixtures/streaming", "Streaming"),
     "perf": ("./internal/fixtures/perf", "Perf"),
@@ -17,7 +18,7 @@ FIXTURES = {
 }
 
 
-def generate_python(names=("greeter", "hello", "textkit")):
+def generate_python(names=("greeter", "hello", "textkit", "shared")):
     output = ROOT / ".generated/python"
     output.mkdir(parents=True, exist_ok=True)
     (ROOT / "bin").mkdir(exist_ok=True)
