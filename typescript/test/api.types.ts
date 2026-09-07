@@ -41,3 +41,22 @@ async function typedBatchTest(client: TypesPlus) {
  // @ts-expect-error generated batch descriptors validate public parameter names
  client.calls.roundTrip({missing:1});
 }
+
+import {AuthClient, AuthClientSession, type Result} from './shared.js';
+async function sharedObjects(): Promise<void> {
+  const domain = new AuthClient({accountName: 'work', labels: null});
+  const result: Result = await domain.identify();
+  for await (const item of domain.watch({count: 2})) { const typed: Result = item; void typed; }
+  await using transport = new AuthClientSession();
+  const pinned = new AuthClient({accountName: 'work', labels: [], _client: transport});
+  const batch = await transport.batch([domain.calls.identify(), pinned.calls.identify()]);
+  if (!batch[0].error) { const typed: Result = batch[0].result; void typed; }
+  // @ts-expect-error shared configuration is required
+  new AuthClient();
+  // @ts-expect-error wire field names are renamed for TypeScript
+  new AuthClient({account: 'work', labels: []});
+  // @ts-expect-error a domain object does not own a daemon
+  await domain.close();
+  void result;
+}
+void sharedObjects;

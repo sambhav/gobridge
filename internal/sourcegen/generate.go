@@ -185,6 +185,7 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 	}
 	var operations []operation
 	var constructor, receiver string
+	var shared bool
 	var functional bool
 	var optionFactories []operation
 	seen := make(map[string]token.Position)
@@ -263,6 +264,7 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 				return fail(fmt.Errorf("constructor must return a pointer to a named local type; generic receivers need a concrete wrapper"))
 			}
 			constructor, receiver = fn.Name.Name, name.Name
+			shared = hasSharedAnnotation(fn.Doc)
 			functional = isFunctional
 			for lang, public := range renames {
 				languageNames[lang]["class"]["class"] = public
@@ -382,7 +384,11 @@ func render(dir, output string, buildContext build.Context) ([]byte, error) {
 		fmt.Fprintf(&out, "},%s...)...)\n", optionsName)
 	}
 	if constructor != "" {
-		fmt.Fprintf(&out, "%s, %s := %s.NewObject(%s, %s", object, errName, bridge, registry, constructor)
+		objectFactory := "NewObject"
+		if shared {
+			objectFactory = "NewSharedObject"
+		}
+		fmt.Fprintf(&out, "%s, %s := %s.%s(%s, %s", object, errName, bridge, objectFactory, registry, constructor)
 		// Source order is stable: sorted files, then declaration order.
 		for _, option := range optionFactories {
 			fmt.Fprintf(&out, ", %s.ConstructorOption(%q, %s", bridge, option.name, option.function)
@@ -451,6 +457,13 @@ func annotations(group *ast.CommentGroup) (kind, name, description string, err e
 		if directive := strings.Fields(text)[0]; directive == "gobridge:python" || directive == "gobridge:ts" {
 			continue
 		}
+		if strings.Fields(text)[0] == "gobridge:shared" {
+			if len(strings.Fields(text)) != 1 {
+				err = fmt.Errorf("//gobridge:shared takes no arguments")
+				return
+			}
+			continue
+		}
 		if kind != "" {
 			err = fmt.Errorf("only one gobridge annotation is allowed per declaration")
 			return
@@ -476,6 +489,10 @@ func annotations(group *ast.CommentGroup) (kind, name, description string, err e
 			err = fmt.Errorf("unknown annotation %q", parts[0])
 			return
 		}
+	}
+	if hasSharedAnnotation(group) && kind != "constructor" {
+		err = fmt.Errorf("//gobridge:shared requires //gobridge:constructor")
+		return
 	}
 	description = strings.TrimSpace(strings.Join(lines, "\n"))
 	return
@@ -583,4 +600,15 @@ func languageAnnotations(group *ast.CommentGroup) (map[string]string, error) {
 		result[lang] = parts[1]
 	}
 	return result, nil
+}
+
+func hasSharedAnnotation(group *ast.CommentGroup) bool {
+	if group != nil {
+		for _, comment := range group.List {
+			if strings.TrimSpace(strings.TrimPrefix(comment.Text, "//")) == "gobridge:shared" {
+				return true
+			}
+		}
+	}
+	return false
 }

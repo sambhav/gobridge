@@ -79,6 +79,9 @@ func main() { r, err := NewGobridge(); if err != nil { panic(err) }; r.Main() }
 
 func TestRejections(t *testing.T) {
 	tests := []struct{ name, source, want string }{
+		{"shared export", "//gobridge:export\n//gobridge:shared\nfunc Greet() {}", "requires //gobridge:constructor"},
+		{"shared alone", "//gobridge:shared\nfunc Greet() {}", "requires //gobridge:constructor"},
+		{"shared arguments", "//gobridge:constructor\n//gobridge:shared extra\nfunc Greet() {}", "takes no arguments"},
 		{"generic function", "//gobridge:export\nfunc Echo[T any](value T) T { return value }", "generic declarations"},
 		{"variadic", "//gobridge:export\nfunc Join(names ...string) {}", "variadic"},
 		{"unnamed", "//gobridge:export\nfunc Greet(string) {}", "unnamed parameters"},

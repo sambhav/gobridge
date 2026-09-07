@@ -12,11 +12,14 @@ type constructor struct {
 	names      map[reflect.Type]string
 	config     reflect.Type
 	initialize func(context.Context, json.RawMessage) error
+	create     func(context.Context, json.RawMessage) (reflect.Value, error)
+	shared     bool
 }
 
-// Object binds method expressions to one constructor-created receiver per daemon.
-// Register all methods before serving; mutable receiver state must be safe for
-// concurrent method calls. Constructors never run during schema generation.
+// Object binds method expressions to constructor-created receivers. NewObject
+// retains one receiver per daemon; NewSharedObject creates one per operation.
+// Register all methods before serving. Persistent receiver state must be safe
+// for concurrent calls. Constructors never run during schema generation.
 type Object struct {
 	registry     *Registry
 	receiverType reflect.Type
@@ -39,6 +42,19 @@ func NewObject(r *Registry, fn any, options ...OptionFactory) (*Object, error) {
 		return nil, fmt.Errorf("option factories require a variadic constructor")
 	}
 	return newObject(r, fn, nil)
+}
+
+// NewSharedObject declares lightweight configuration objects. Each method call
+// constructs its own receiver from the request's configuration; no receiver is
+// retained by the daemon. Constructors should be cheap and must not acquire
+// resources requiring cleanup. Use NewObject for persistent receiver state.
+// Generated objects share the module's lazy transport or its active session.
+func NewSharedObject(r *Registry, fn any, options ...OptionFactory) (*Object, error) {
+	o, err := NewObject(r, fn, options...)
+	if err == nil {
+		r.constructor.shared = true
+	}
+	return o, err
 }
 
 func newObject(r *Registry, fn any, generated map[reflect.Type]string) (*Object, error) {
@@ -116,10 +132,10 @@ func newObject(r *Registry, fn any, generated map[reflect.Type]string) (*Object,
 		return nil, fmt.Errorf("constructor result must be a pointer to a named struct")
 	}
 	object := &Object{registry: r, receiverType: receiverType}
-	r.constructor = &constructor{config: config, names: generated, initialize: func(ctx context.Context, raw json.RawMessage) error {
+	r.constructor = &constructor{config: config, names: generated, create: func(ctx context.Context, raw json.RawMessage) (reflect.Value, error) {
 		v, err := decodeInput(raw, config)
 		if err != nil {
-			return Failure("invalid_argument", err.Error())
+			return reflect.Value{}, Failure("invalid_argument", err.Error())
 		}
 		args := make([]reflect.Value, 0, t.NumIn())
 		if offset == 1 {
@@ -130,14 +146,18 @@ func newObject(r *Registry, fn any, generated map[reflect.Type]string) (*Object,
 		}
 		results := f.Call(args)
 		if t.NumOut() == 2 && !results[1].IsNil() {
-			return results[1].Interface().(error)
+			return reflect.Value{}, results[1].Interface().(error)
 		}
 		if results[0].IsNil() {
-			return Failure("internal", "constructor returned a nil receiver")
+			return reflect.Value{}, Failure("internal", "constructor returned a nil receiver")
 		}
-		object.instance = results[0]
-		return nil
+		return results[0], nil
 	}}
+	r.constructor.initialize = func(ctx context.Context, raw json.RawMessage) error {
+		var err error
+		object.instance, err = r.constructor.create(ctx, raw)
+		return err
+	}
 	return object, nil
 }
 
@@ -154,9 +174,53 @@ func (o *Object) Bind(name string, method any, paramNames ...string) error {
 	if !f.IsValid() || f.Kind() != reflect.Func || f.IsNil() || f.Type().NumIn() == 0 || f.Type().In(0) != o.receiverType {
 		return fmt.Errorf("method must be an expression with first parameter %s", o.receiverType)
 	}
-	op, err := compileBinding(name, f, func() reflect.Value { return o.instance }, paramNames)
+	op, err := compileBinding(name, f, func(ctx context.Context) reflect.Value {
+		if o.registry.constructor.shared {
+			return ctx.Value(o).(reflect.Value)
+		}
+		return o.instance
+	}, paramNames)
 	if err != nil {
 		return fmt.Errorf("bind method %s: %w", name, err)
+	}
+	if o.registry.constructor.shared {
+		op.shared = true
+		prepare := func(ctx context.Context, raw json.RawMessage) (context.Context, json.RawMessage, error) {
+			var request map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &request); err != nil || len(request) != 2 || request["config"] == nil || request["params"] == nil {
+				return ctx, nil, Failure("invalid_argument", "expected shared object config and params")
+			}
+			// Reject invalid arguments before running constructor user code.
+			if _, err := decodeInput(request["params"], op.in); err != nil {
+				return ctx, nil, Failure("invalid_argument", err.Error())
+			}
+			instance, err := o.registry.constructor.create(ctx, request["config"])
+			if err != nil {
+				return ctx, nil, err
+			}
+			if err := ctx.Err(); err != nil {
+				return ctx, nil, err
+			}
+			return context.WithValue(ctx, o, instance), request["params"], nil
+		}
+		if call := op.call; call != nil {
+			op.call = func(ctx context.Context, raw json.RawMessage) (any, error) {
+				ctx, params, err := prepare(ctx, raw)
+				if err != nil {
+					return nil, err
+				}
+				return call(ctx, params)
+			}
+		}
+		if stream := op.stream; stream != nil {
+			op.stream = func(ctx context.Context, raw json.RawMessage, yield func(any) error) error {
+				ctx, params, err := prepare(ctx, raw)
+				if err != nil {
+					return err
+				}
+				return stream(ctx, params, yield)
+			}
+		}
 	}
 	return o.registry.add(op)
 }
@@ -165,7 +229,7 @@ func (o *Object) Bind(name string, method any, paramNames ...string) error {
 func (r *Registry) NeedsInit() bool {
 	// Registration is complete before calls begin. Avoid a lock in the common
 	// stateless function path, where there is no constructor state to publish.
-	if r.constructor == nil {
+	if r.constructor == nil || r.constructor.shared {
 		return false
 	}
 	r.initMu.Lock()
@@ -189,8 +253,8 @@ func (r *Registry) Initialize(ctx context.Context, config json.RawMessage) (err 
 			err = Failure("internal", "constructor panicked")
 		}
 	}()
-	if r.constructor == nil {
-		return Failure("failed_precondition", "no constructor is registered")
+	if r.constructor == nil || r.constructor.shared {
+		return Failure("failed_precondition", "no process-owned constructor is registered")
 	}
 	if r.initAttempt {
 		return Failure("failed_precondition", "service initialization has already been attempted")
