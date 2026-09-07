@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.0](https://github.com/sambhav/gobridge/compare/v3.1.0...v3.2.0) (2026-09-07)
+
+
+### Features
+
+* share one daemon across lightweight domain objects ([#31](https://github.com/sambhav/gobridge/issues/31)) ([deeaaf1](https://github.com/sambhav/gobridge/commit/deeaaf194bcb8a77bd267d93966b65de29e268e0))
+
 ## [3.1.0](https://github.com/sambhav/gobridge/compare/v3.0.0...v3.1.0) (2026-09-07)
 
 
