@@ -2,7 +2,7 @@
   "name": "greeter",
   "source": "./examples/greeter",
   "command": "./examples/greeter/cmd/greeter",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "repository": "https://github.com/sambhav/gobridge",
   "license": "Apache-2.0",
   "python": {
